@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+
+# Data & Logs (generated at runtime)
+data/
+logs/
+outputs/tweets/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Neo4j data
+neo4j_data/

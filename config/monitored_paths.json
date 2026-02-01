@@ -1,0 +1,14 @@
+{
+  "monitored": [],
+  "blacklist": [
+    "**/.git",
+    "**/.venv",
+    "**/venv",
+    "**/.claude",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.idea",
+    "**/.vscode"
+  ],
+  "project_roots": {}
+}

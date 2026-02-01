@@ -1,0 +1,12 @@
+# Activity Log
+
+{% for date, sessions in dates.items() | sort(reverse=True) %}
+## {{ date }}
+{% for session in sessions %}
+**Session {{ session.start_time }} - {{ session.end_time }}**
+{% for event in session.events %}
+- {{ event.time }} - {{ event.description }}
+{% endfor %}
+
+{% endfor %}
+{% endfor %}

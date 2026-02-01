@@ -1,0 +1,28 @@
+# {{ project_name | replace('-', ' ') | title }}
+
+## Week of {{ week_start }}
+
+{{ weekly_summary }}
+
+**Key Developments:**
+{% for item in key_developments %}
+- {{ item }}
+{% endfor %}
+
+**Challenges:**
+{% for item in challenges %}
+- {{ item }}
+{% endfor %}
+
+**Next Steps:**
+{% for item in next_steps %}
+- {{ item }}
+{% endfor %}
+
+{% if related_projects %}
+Related: {% for project in related_projects %}[[{{ project }}]]{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+---
+
+{{ existing_content }}
