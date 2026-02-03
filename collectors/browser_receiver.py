@@ -3,6 +3,7 @@ Browser activity receiver for PAIS.
 Handles incoming page visit data from browser extension.
 """
 
+import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -69,7 +70,7 @@ class BrowserReceiver(BaseCollector):
             event_id = self.db.insert_event(
                 source=event["source"],
                 event_type=event["event_type"],
-                raw_data=str(event["data"]),
+                raw_data=json.dumps(event["data"]),
                 event_time=event["timestamp"]
             )
             

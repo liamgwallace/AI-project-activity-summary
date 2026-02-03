@@ -164,8 +164,27 @@
     </div>
   </div>
   
+  <div class="stats-section" id="stats-section" style="display: none; margin-bottom: 12px;">
+    <div class="stats">
+      <div class="stats-row">
+        <span class="stats-label">Total Events (24h):</span>
+        <span class="stats-value" id="stats-total">-</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">Unprocessed:</span>
+        <span class="stats-value" id="stats-unprocessed">-</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">Recent Visits:</span>
+        <span class="stats-value" id="stats-visits">-</span>
+      </div>
+    </div>
+  </div>
+  
   <div class="actions">
     <button class="btn-primary" id="toggle-btn">Disable Tracking</button>
+    <button class="btn-secondary" id="stats-btn">Show Stats</button>
+    <button class="btn-secondary" id="health-btn">Check Health</button>
     <button class="btn-secondary" id="settings-btn">Open Settings</button>
     <button class="btn-secondary" id="sync-btn">Sync Now</button>
   </div>

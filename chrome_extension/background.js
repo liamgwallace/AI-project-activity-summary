@@ -5,7 +5,9 @@
 const DEFAULT_CONFIG = {
   apiEndpoint: 'http://localhost:8000/api/browser/visit',
   apiKey: 'your-api-key-here',
-  enabled: true
+  enabled: true,
+  baseUrl: 'http://localhost:8000',
+  deviceName: 'desktop'
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -15,6 +17,10 @@ let offlineQueue = [];
 chrome.storage.sync.get(['paiConfig'], (result) => {
   if (result.paiConfig) {
     config = { ...DEFAULT_CONFIG, ...result.paiConfig };
+    // Ensure apiEndpoint is set if baseUrl is provided
+    if (config.baseUrl && !config.apiEndpoint) {
+      config.apiEndpoint = `${config.baseUrl}/api/browser/visit`;
+    }
   }
 });
 
@@ -93,6 +99,13 @@ async function retryOfflineQueue() {
   
   for (const visit of queue) {
     try {
+      console.log('PAI: Retrying visit:', {
+        url: visit.url,
+        title: visit.title,
+        timestamp: visit.timestamp,
+        device: visit.device
+      });
+      
       const response = await fetch(config.apiEndpoint, {
         method: 'POST',
         headers: {
@@ -103,17 +116,19 @@ async function retryOfflineQueue() {
           url: visit.url,
           title: visit.title,
           timestamp: visit.timestamp,
-          device: visit.device,
-          offline_retry: true
+          device: visit.device
         })
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error(`PAI: HTTP ${response.status} error:`, errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
       console.log('PAI: Retried visit sent successfully', visit.url);
     } catch (error) {
+      console.error('PAI: Failed to retry visit:', error.message);
       visit.retryCount++;
       if (visit.retryCount < 5) {
         offlineQueue.push(visit);
@@ -159,6 +174,51 @@ self.addEventListener('online', () => {
 chrome.storage.local.get(['offlineQueue'], (result) => {
   if (result.offlineQueue) {
     offlineQueue = result.offlineQueue;
+  }
+});
+
+// Fetch available endpoints from server
+async function fetchServerEndpoints() {
+  const baseUrl = config.baseUrl || 'http://localhost:8000';
+  
+  try {
+    const response = await fetch(`${baseUrl}/`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.endpoints && Array.isArray(data.endpoints)) {
+        // Store available endpoints
+        config.availableEndpoints = data.endpoints;
+        console.log('PAI: Available endpoints loaded:', data.endpoints);
+        return data.endpoints;
+      }
+    }
+  } catch (error) {
+    console.log('PAI: Could not fetch endpoints from server');
+  }
+  return null;
+}
+
+// Fetch endpoints on startup
+fetchServerEndpoints();
+
+// Refresh endpoints periodically (every 30 minutes)
+setInterval(fetchServerEndpoints, 30 * 60 * 1000);
+
+// Listen for messages from popup.js
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('PAI Background: Received message:', request);
+  
+  if (request.action === 'retryOfflineQueue') {
+    console.log('PAI Background: Processing retryOfflineQueue, queue length:', offlineQueue.length);
+    
+    retryOfflineQueue().then(() => {
+      console.log('PAI Background: retryOfflineQueue completed');
+      sendResponse({ success: true, queueLength: offlineQueue.length });
+    }).catch((error) => {
+      console.error('PAI Background: Error retrying offline queue:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+    return true; // Required for async sendResponse
   }
 });
 

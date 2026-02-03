@@ -89,6 +89,40 @@
         .test-button:hover {
             background: #0b7dda;
         }
+        .endpoints-list {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 5px;
+        }
+        .endpoint-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .endpoint-item:last-child {
+            border-bottom: none;
+        }
+        .endpoint-path {
+            font-family: monospace;
+            font-size: 13px;
+            color: #2196F3;
+            min-width: 180px;
+        }
+        .endpoint-method {
+            background: #4CAF50;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            margin-right: 12px;
+        }
+        .endpoint-desc {
+            color: #666;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -99,9 +133,9 @@
         
         <form id="settingsForm">
             <div class="form-group">
-                <label for="apiEndpoint">API Endpoint</label>
-                <input type="url" id="apiEndpoint" placeholder="https://pai.yourdomain.com/api/browser/visit" required>
-                <div class="help-text">The URL of your PAI server (e.g., http://localhost:8000/api/browser/visit)</div>
+                <label for="baseUrl">Base URL</label>
+                <input type="url" id="baseUrl" placeholder="http://localhost:8000" required>
+                <div class="help-text">The base URL of your PAI server (e.g., http://localhost:8000)</div>
             </div>
             
             <div class="form-group">
@@ -114,6 +148,28 @@
                 <label for="deviceName">Device Name</label>
                 <input type="text" id="deviceName" placeholder="desktop" required>
                 <div class="help-text">Identifier for this device (e.g., desktop, laptop, mobile)</div>
+            </div>
+            
+            <div class="form-group">
+                <label>Configured Endpoints</label>
+                <div id="endpoints-list" class="endpoints-list">
+                    <div class="endpoint-item">
+                        <span class="endpoint-path">/api/health</span>
+                        <span class="endpoint-method">GET</span>
+                        <span class="endpoint-desc">Health check</span>
+                    </div>
+                    <div class="endpoint-item">
+                        <span class="endpoint-path">/api/stats</span>
+                        <span class="endpoint-method">GET</span>
+                        <span class="endpoint-desc">Get statistics</span>
+                    </div>
+                    <div class="endpoint-item">
+                        <span class="endpoint-path">/api/browser/visit</span>
+                        <span class="endpoint-method">POST</span>
+                        <span class="endpoint-desc">Receive page visits</span>
+                    </div>
+                </div>
+                <div class="help-text">These endpoints will be used by the browser extension</div>
             </div>
             
             <button type="submit">Save Settings</button>

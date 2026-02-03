@@ -56,6 +56,12 @@ class OpenAIConfig:
 
 
 @dataclass
+class ObsidianConfig:
+    project_vault: str = ""
+    personal_vault: str = ""
+
+
+@dataclass
 class Project:
     name: str = ""
     description: str = ""
@@ -79,6 +85,7 @@ class Settings:
     gmail: GmailConfig = field(default_factory=GmailConfig)
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
     openai: OpenAIConfig = field(default_factory=OpenAIConfig)
+    obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
     projects: Dict[str, Project] = field(default_factory=dict)
     
     def __post_init__(self):
@@ -131,6 +138,10 @@ def load_settings(config_file: Optional[str] = None) -> Settings:
     settings.openai.max_tokens = int(os.getenv("PAIS_OPENAI_MAX_TOKENS", "2000"))
     settings.openai.embedding_model = os.getenv("PAIS_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
     
+    # Obsidian config
+    settings.obsidian.project_vault = os.getenv("PAIS_OBSIDIAN_PROJECT_VAULT", "")
+    settings.obsidian.personal_vault = os.getenv("PAIS_OBSIDIAN_PERSONAL_VAULT", "")
+    
     # Load from config file if provided
     if config_file and Path(config_file).exists():
         with open(config_file, "r") as f:
@@ -182,6 +193,11 @@ def _merge_config_data(settings: Settings, data: Dict[str, Any]) -> Settings:
         for key, value in data["openai"].items():
             if hasattr(settings.openai, key):
                 setattr(settings.openai, key, value)
+    
+    if "obsidian" in data:
+        for key, value in data["obsidian"].items():
+            if hasattr(settings.obsidian, key):
+                setattr(settings.obsidian, key, value)
     
     return settings
 

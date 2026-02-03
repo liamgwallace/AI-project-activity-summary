@@ -23,17 +23,22 @@ PAI Browser Tracker is a Chrome extension (Manifest V3) that monitors browsing a
 - Implements offline queue with retry logic
 - Detects device type from user agent
 - Supports API key authentication
+- Fetches available endpoints from server on startup
 
 ### Popup Interface
 - Toggle tracking on/off
 - View current endpoint and queue status
 - Manual sync trigger for offline queue
 - Device type display
+- **Stats button** - Fetches and displays statistics from `/api/stats` endpoint
+- **Health check button** - Verifies server connectivity via `/api/health` endpoint
 
 ### Options Page
-- Configure API endpoint URL
+- Configure base URL for the PAIS server
 - Set API key for authentication
-- Enable/disable tracking
+- Set device name identifier
+- View configured API endpoints with descriptions
+- Test connection to verify configuration
 
 ## Configuration
 
@@ -42,9 +47,20 @@ Default configuration in `background.js`:
 {
   apiEndpoint: 'http://localhost:8000/api/browser/visit',
   apiKey: 'your-api-key-here',
-  enabled: true
+  enabled: true,
+  baseUrl: 'http://localhost:8000',
+  deviceName: 'desktop'
 }
 ```
+
+### API Endpoints Used
+
+The extension automatically uses the following endpoints based on the configured base URL:
+
+- `GET /api/health` - Health check endpoint
+- `GET /api/stats` - Statistics endpoint (total events, unprocessed events, recent visits)
+- `POST /api/browser/visit` - Page visit tracking endpoint
+- `GET /` - Root endpoint to fetch available API endpoints
 
 ## Installation
 
@@ -56,6 +72,18 @@ Default configuration in `background.js`:
 ## Usage
 
 The extension automatically tracks page visits when enabled. Data is sent to the PAIS API server. If offline, visits are queued and retried when connection is restored.
+
+### Stats Button
+Click the "Show Stats" button in the popup to fetch and display:
+- Total events (last 24 hours)
+- Unprocessed events count
+- Recent browser visits count
+
+### Health Check
+Click the "Check Health" button to verify server connectivity and display:
+- Server health status
+- PAIS version
+- Server timestamp
 
 ## Permissions
 

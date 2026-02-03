@@ -17,7 +17,8 @@ async function init() {
   currentConfig = result.paiConfig || {
     apiEndpoint: 'http://localhost:8000/api/browser/visit',
     apiKey: 'your-api-key-here',
-    enabled: true
+    enabled: true,
+    baseUrl: 'http://localhost:8000'
   };
   
   // Load offline queue stats
@@ -31,6 +32,8 @@ async function init() {
   document.getElementById('toggle-btn').addEventListener('click', toggleTracking);
   document.getElementById('settings-btn').addEventListener('click', openSettings);
   document.getElementById('sync-btn').addEventListener('click', syncNow);
+  document.getElementById('stats-btn').addEventListener('click', toggleStats);
+  document.getElementById('health-btn').addEventListener('click', checkHealth);
 }
 
 // Update UI elements
@@ -101,7 +104,9 @@ async function syncNow() {
   
   try {
     // Send message to background to retry offline queue
-    await chrome.runtime.sendMessage({ action: 'retryOfflineQueue' });
+    console.log('PAI Popup: Sending retryOfflineQueue message');
+    const response = await chrome.runtime.sendMessage({ action: 'retryOfflineQueue' });
+    console.log('PAI Popup: Received response:', response);
     
     // Refresh queue count
     const result = await chrome.storage.local.get(['offlineQueue']);
@@ -115,10 +120,112 @@ async function syncNow() {
       syncBtn.disabled = false;
     }, 2000);
   } catch (error) {
+    console.error('PAI Popup: Sync error:', error);
     syncBtn.textContent = 'Error';
     setTimeout(() => {
       syncBtn.textContent = originalText;
       syncBtn.disabled = false;
+    }, 2000);
+  }
+}
+
+// Toggle stats display
+async function toggleStats() {
+  const statsSection = document.getElementById('stats-section');
+  const statsBtn = document.getElementById('stats-btn');
+  
+  if (statsSection.style.display === 'none') {
+    statsBtn.textContent = 'Loading...';
+    statsBtn.disabled = true;
+    
+    try {
+      await fetchStats();
+      statsSection.style.display = 'block';
+      statsBtn.textContent = 'Hide Stats';
+    } catch (error) {
+      statsBtn.textContent = 'Error';
+      setTimeout(() => {
+        statsBtn.textContent = 'Show Stats';
+      }, 2000);
+    } finally {
+      statsBtn.disabled = false;
+    }
+  } else {
+    statsSection.style.display = 'none';
+    statsBtn.textContent = 'Show Stats';
+  }
+}
+
+// Fetch stats from API
+async function fetchStats() {
+  if (!currentConfig) return;
+  
+  const baseUrl = currentConfig.baseUrl || 'http://localhost:8000';
+  const statsUrl = `${baseUrl}/api/stats`;
+  
+  try {
+    const response = await fetch(statsUrl, {
+      method: 'GET',
+      headers: {
+        'X-API-Key': currentConfig.apiKey || ''
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const stats = await response.json();
+    
+    document.getElementById('stats-total').textContent = stats.total_events || 0;
+    document.getElementById('stats-unprocessed').textContent = stats.unprocessed_events || 0;
+    document.getElementById('stats-visits').textContent = stats.recent_visits || 0;
+    
+  } catch (error) {
+    console.error('Failed to fetch stats:', error);
+    document.getElementById('stats-total').textContent = 'Error';
+    document.getElementById('stats-unprocessed').textContent = 'Error';
+    document.getElementById('stats-visits').textContent = 'Error';
+    throw error;
+  }
+}
+
+// Check health endpoint
+async function checkHealth() {
+  const healthBtn = document.getElementById('health-btn');
+  const originalText = healthBtn.textContent;
+  
+  healthBtn.textContent = 'Checking...';
+  healthBtn.disabled = true;
+  
+  try {
+    const baseUrl = currentConfig?.baseUrl || 'http://localhost:8000';
+    const healthUrl = `${baseUrl}/api/health`;
+    
+    const response = await fetch(healthUrl);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const health = await response.json();
+    
+    // Show alert with health info
+    alert(`Health Check: ${health.status}\nVersion: ${health.version}\nTimestamp: ${new Date(health.timestamp).toLocaleString()}`);
+    
+    healthBtn.textContent = 'Healthy!';
+    setTimeout(() => {
+      healthBtn.textContent = originalText;
+      healthBtn.disabled = false;
+    }, 2000);
+    
+  } catch (error) {
+    console.error('Health check failed:', error);
+    alert(`Health Check Failed: ${error.message}`);
+    healthBtn.textContent = 'Failed';
+    setTimeout(() => {
+      healthBtn.textContent = originalText;
+      healthBtn.disabled = false;
     }, 2000);
   }
 }

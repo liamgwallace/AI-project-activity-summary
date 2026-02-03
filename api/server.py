@@ -108,22 +108,30 @@ async def health_check():
 @app.post("/api/browser/visit", response_model=PageVisitResponse)
 async def receive_page_visit(
     request: PageVisitRequest,
-    x_api_key: Optional[str] = Header(None)
+    x_api_key: Optional[str] = Header(None),
+    verbose: bool = False
 ):
     """
     Receive a page visit from the browser extension.
     
     Requires X-API-Key header if API key is configured.
+    
+    Query params:
+    - verbose: Set to true for detailed logging (default: concise)
     """
-    # Verbose logging - print what was received
-    logger.info("=" * 60)
-    logger.info("📥 BROWSER VISIT RECEIVED")
-    logger.info(f"🔗 URL: {request.url}")
-    logger.info(f"📄 Title: {request.title}")
-    logger.info(f"🖥️  Device: {request.device}")
-    logger.info(f"⏰ Timestamp: {request.timestamp}")
-    logger.info(f"🔑 API Key: {x_api_key if x_api_key else 'None'}")
-    logger.info("=" * 60)
+    # Concise logging by default, verbose when requested
+    if verbose:
+        logger.info("=" * 60)
+        logger.info("📥 BROWSER VISIT RECEIVED")
+        logger.info(f"🔗 URL: {request.url}")
+        logger.info(f"📄 Title: {request.title}")
+        logger.info(f"🖥️  Device: {request.device}")
+        logger.info(f"⏰ Timestamp: {request.timestamp}")
+        logger.info(f"🔑 API Key: {x_api_key if x_api_key else 'None'}")
+        logger.info("=" * 60)
+    else:
+        # Concise one-line log
+        logger.info(f"📥 {request.title[:60]} | {request.url[:80]}")
     
     try:
         result = browser_receiver.receive_page_visit(
@@ -139,8 +147,9 @@ async def receive_page_visit(
                 raise HTTPException(status_code=401, detail=result["message"])
             raise HTTPException(status_code=400, detail=result["message"])
         
-        # Log successful storage
-        logger.info(f"✅ STORED: Event ID {result.get('event_id')} - {request.title[:50]}...")
+        # Log successful storage (only in verbose mode)
+        if verbose:
+            logger.info(f"✅ STORED: Event ID {result.get('event_id')} - {request.title[:50]}...")
         
         return PageVisitResponse(
             success=result["success"],

@@ -176,9 +176,11 @@ def check_and_process() -> None:
         db = Database(get_settings().database.path)
     if not obsidian_writer:
         settings = get_settings()
+        project_vault = settings.obsidian.project_vault or str(Path(settings.data_dir) / "project-vault")
+        personal_vault = settings.obsidian.personal_vault or str(Path(settings.data_dir) / "personal-vault")
         obsidian_writer = ObsidianWriter(
-            project_vault=Path(settings.data_dir) / "project-vault",
-            personal_vault=Path(settings.data_dir) / "personal-vault",
+            project_vault=str(project_vault),
+            personal_vault=str(personal_vault),
         )
 
     # Initialize batch manager
@@ -351,9 +353,11 @@ def run_weekly_synthesis() -> None:
         db = Database(get_settings().database.path)
     if not obsidian_writer:
         settings = get_settings()
+        project_vault = settings.obsidian.project_vault or str(Path(settings.data_dir) / "project-vault")
+        personal_vault = settings.obsidian.personal_vault or str(Path(settings.data_dir) / "personal-vault")
         obsidian_writer = ObsidianWriter(
-            project_vault=Path(settings.data_dir) / "project-vault",
-            personal_vault=Path(settings.data_dir) / "personal-vault",
+            project_vault=str(project_vault),
+            personal_vault=str(personal_vault),
         )
 
     try:
@@ -483,9 +487,11 @@ def main() -> None:
     settings = get_settings()
     
     db = Database(settings.database.path)
+    project_vault = settings.obsidian.project_vault or str(Path(settings.data_dir) / "project-vault")
+    personal_vault = settings.obsidian.personal_vault or str(Path(settings.data_dir) / "personal-vault")
     obsidian_writer = ObsidianWriter(
-        project_vault=Path(settings.data_dir) / "project-vault",
-        personal_vault=Path(settings.data_dir) / "personal-vault",
+        project_vault=str(project_vault),
+        personal_vault=str(personal_vault),
     )
 
     # Set up signal handlers
