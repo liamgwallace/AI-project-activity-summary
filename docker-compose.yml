@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  pais:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: personal-activity-intelligence
+    restart: unless-stopped
+    
+    ports:
+      - "${PAIS_PORT:-8000}:8000"
+    
+    environment:
+      # Application Settings
+      - PAIS_DEBUG=${PAIS_DEBUG:-false}
+      - PAIS_DATA_DIR=/app/data
+      - PAIS_LOG_DIR=/app/logs
+      - PAIS_CONFIG_DIR=/app/config
+      
+      # Database
+      - PAIS_DB_PATH=/app/data/activity_system.db
+      
+      # GitHub
+      - PAIS_GITHUB_TOKEN=${PAIS_GITHUB_TOKEN}
+      - PAIS_GITHUB_USERNAME=${PAIS_GITHUB_USERNAME}
+      - PAIS_GITHUB_REPOS=${PAIS_GITHUB_REPOS}
+      - PAIS_GITHUB_FETCH_COMMITS=${PAIS_GITHUB_FETCH_COMMITS:-true}
+      - PAIS_GITHUB_FETCH_PRS=${PAIS_GITHUB_FETCH_PRS:-true}
+      - PAIS_GITHUB_FETCH_ISSUES=${PAIS_GITHUB_FETCH_ISSUES:-true}
+      - PAIS_GITHUB_FETCH_REVIEWS=${PAIS_GITHUB_FETCH_REVIEWS:-true}
+      
+      # Gmail
+      - PAIS_GMAIL_CREDENTIALS_PATH=/app/config/gmail_credentials.json
+      - PAIS_GMAIL_TOKEN_PATH=/app/config/gmail_token.json
+      - PAIS_GMAIL_QUERY_DAYS=${PAIS_GMAIL_QUERY_DAYS:-7}
+      - PAIS_GMAIL_LABELS=${PAIS_GMAIL_LABELS:-INBOX,SENT}
+      
+      # Calendar
+      - PAIS_CALENDAR_CREDENTIALS_PATH=/app/config/calendar_credentials.json
+      - PAIS_CALENDAR_TOKEN_PATH=/app/config/calendar_token.json
+      - PAIS_CALENDAR_CALENDARS=${PAIS_CALENDAR_CALENDARS}
+      
+      # OpenAI
+      - PAIS_OPENAI_API_KEY=${PAIS_OPENAI_API_KEY}
+      - PAIS_OPENAI_MODEL=${PAIS_OPENAI_MODEL:-gpt-4o-mini}
+      - PAIS_OPENAI_TEMPERATURE=${PAIS_OPENAI_TEMPERATURE:-0.3}
+      - PAIS_OPENAI_MAX_TOKENS=${PAIS_OPENAI_MAX_TOKENS:-2000}
+      - PAIS_OPENAI_EMBEDDING_MODEL=${PAIS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      
+      # Server
+      - PAIS_HOST=${PAIS_HOST:-0.0.0.0}
+      - PAIS_PORT=${PAIS_PORT:-8000}
+      
+      # Security
+      - PAIS_SECRET_KEY=${PAIS_SECRET_KEY:-change-this-in-production}
+      - PAIS_ACCESS_TOKEN_EXPIRE_MINUTES=${PAIS_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+    
+    volumes:
+      # Persistent data storage
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    
+    # Optional: Add a named volume for the database
+    # volumes:
+    #   - pais_data:/app/data
+    #   - pais_logs:/app/logs
+    #   - ./config:/app/config:ro
+    
+    networks:
+      - pais_network
+    
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '1.0'
+    #       memory: 512M
+
+  # Optional: Add a scheduler service for background processing
+  # scheduler:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: pais-scheduler
+  #   restart: unless-stopped
+  #   command: ["python", "-m", "processors.scheduler"]
+  #   environment:
+  #     - PAIS_DB_PATH=/app/data/activity_system.db
+  #     - PAIS_OPENAI_API_KEY=${PAIS_OPENAI_API_KEY}
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./config:/app/config:ro
+  #   networks:
+  #     - pais_network
+  #   depends_on:
+  #     - pais
+
+# Named volumes (optional)
+# volumes:
+#   pais_data:
+#     driver: local
+#   pais_logs:
+#     driver: local
+
+networks:
+  pais_network:
+    driver: bridge
