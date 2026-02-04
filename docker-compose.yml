@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   pais:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/liamgwallace/ai-project-activity-summary:main
     container_name: personal-activity-intelligence
     restart: unless-stopped
     
