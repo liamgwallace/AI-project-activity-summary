@@ -41,6 +41,7 @@ env/
 # Data and logs
 data/*.db
 data/*.db-journal
+data/*token.json
 logs/*.log
 logs/*.log.*
 

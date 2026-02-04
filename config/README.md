@@ -52,11 +52,18 @@ PAIS_DB_PATH=data/activity_system.db
 PAIS_GITHUB_TOKEN=ghp_xxx
 PAIS_GITHUB_USERNAME=user
 PAIS_GMAIL_CREDENTIALS_PATH=config/gmail_credentials.json
+PAIS_GMAIL_TOKEN_PATH=data/gmail_token.json
 PAIS_CALENDAR_CREDENTIALS_PATH=config/calendar_credentials.json
+PAIS_CALENDAR_TOKEN_PATH=data/calendar_token.json
 PAIS_OPENAI_API_KEY=sk-xxx
 PAIS_OPENAI_MODEL=gpt-4o-mini
 PAIS_OPENAI_TEMPERATURE=0.3
 ```
+
+**Note on Google OAuth Files:**
+- **Credentials** (`*_credentials.json`) - Downloaded from Google Cloud Console, stored in `config/` (static, read-only)
+- **Tokens** (`*_token.json`) - Generated on first OAuth flow, stored in `data/` (dynamic, read-write)
+- This separation allows credentials to be mounted read-only in Docker while tokens remain writable
 
 ## Usage
 

@@ -62,6 +62,30 @@ class TweetDraft:
     engagement_stats: str = "{}"
 
 
+@dataclass
+class Entity:
+    id: Optional[int] = None
+    entity_type: str = ""
+    name: str = ""
+    display_name: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    mention_count: int = 0
+
+
+@dataclass
+class Relationship:
+    id: Optional[int] = None
+    from_type: str = ""
+    from_id: int = 0
+    to_type: str = ""
+    to_id: int = 0
+    rel_type: str = ""
+    confidence: float = 1.0
+    created_at: Optional[str] = None
+
+
 class Database:
     """SQLite database manager with all required operations."""
     
@@ -168,6 +192,46 @@ class Database:
             )
         """)
         
+        # Entities table for graph system
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS entities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                display_name TEXT,
+                metadata TEXT DEFAULT '{}',
+                first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+                mention_count INTEGER DEFAULT 1,
+                UNIQUE(entity_type, name)
+            )
+        """)
+        
+        # Relationships table for graph system
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_type TEXT NOT NULL,
+                from_id INTEGER NOT NULL,
+                to_type TEXT NOT NULL,
+                to_id INTEGER NOT NULL,
+                rel_type TEXT NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(from_type, from_id, to_type, to_id, rel_type)
+            )
+        """)
+        
+        # Entity aliases table for name variations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS entity_aliases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_id INTEGER NOT NULL,
+                alias TEXT UNIQUE NOT NULL,
+                FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
+            )
+        """)
+        
         # Create indexes for performance
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_raw_events_processed 
@@ -186,11 +250,371 @@ class Database:
             ON activities(timestamp)
         """)
         
+        # Indexes for graph tables
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_entities_type 
+            ON entities(entity_type)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_entities_name 
+            ON entities(name)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rel_from 
+            ON relationships(from_type, from_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rel_to 
+            ON relationships(to_type, to_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rel_type 
+            ON relationships(rel_type)
+        """)
+        
         conn.commit()
         conn.close()
-    
+
+    # Graph system methods
+
+    def _normalize_entity_name(self, name: str) -> str:
+        """Normalize entity name: lowercase and replace spaces with hyphens."""
+        return name.lower().strip().replace(" ", "-")
+
+    def get_or_create_entity(
+        self,
+        name: str,
+        entity_type: str,
+        display_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Get existing or create new entity. Updates last_seen and mention_count if exists.
+        
+        Args:
+            name: Entity name (will be normalized).
+            entity_type: Type of entity (e.g., 'person', 'project', 'technology').
+            display_name: Optional display name (uses normalized name if not provided).
+            metadata: Optional dictionary of metadata.
+            
+        Returns:
+            Entity ID.
+        """
+        normalized_name = self._normalize_entity_name(name)
+        now = datetime.now().isoformat()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Try to get existing entity
+            cursor.execute(
+                "SELECT id, mention_count FROM entities WHERE entity_type = ? AND name = ?",
+                (entity_type, normalized_name),
+            )
+            row = cursor.fetchone()
+            
+            if row:
+                entity_id = row["id"]
+                new_count = row["mention_count"] + 1
+                
+                # Update existing entity
+                cursor.execute(
+                    "UPDATE entities SET last_seen = ?, mention_count = ? WHERE id = ?",
+                    (now, new_count, entity_id),
+                )
+                conn.commit()
+                return entity_id
+            
+            # Create new entity
+            metadata_json = json.dumps(metadata) if metadata else "{}"
+            cursor.execute(
+                """
+                INSERT INTO entities (entity_type, name, display_name, metadata, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (entity_type, normalized_name, display_name or name, metadata_json, now, now),
+            )
+            
+            entity_id = cursor.lastrowid
+            conn.commit()
+            return entity_id if entity_id is not None else 0
+
+    def create_relationship(
+        self,
+        from_type: str,
+        from_id: int,
+        to_type: str,
+        to_id: int,
+        rel_type: str,
+        confidence: float = 1.0,
+    ) -> int:
+        """Create a relationship between two entities with unique constraint.
+        
+        Args:
+            from_type: Type of the source entity.
+            from_id: ID of the source entity.
+            to_type: Type of the target entity.
+            to_id: ID of the target entity.
+            rel_type: Type of relationship.
+            confidence: Confidence score (0.0 to 1.0).
+            
+        Returns:
+            Relationship ID.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO relationships (from_type, from_id, to_type, to_id, rel_type, confidence)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (from_type, from_id, to_type, to_id, rel_type, confidence),
+            )
+            
+            conn.commit()
+            
+            # If insert was ignored due to conflict, get existing ID
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    """
+                    SELECT id FROM relationships
+                    WHERE from_type = ? AND from_id = ? AND to_type = ? AND to_id = ? AND rel_type = ?
+                    """,
+                    (from_type, from_id, to_type, to_id, rel_type),
+                )
+                row = cursor.fetchone()
+                return row["id"] if row else 0
+            
+            return cursor.lastrowid if cursor.lastrowid is not None else 0
+
+    def get_entity_by_name(self, name: str) -> Optional[Entity]:
+        """Get entity by normalized name.
+        
+        Args:
+            name: Entity name to search for (will be normalized).
+            
+        Returns:
+            Entity if found, None otherwise.
+        """
+        normalized_name = self._normalize_entity_name(name)
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                "SELECT id, entity_type, name, display_name, metadata, first_seen, last_seen, mention_count FROM entities WHERE name = ?",
+                (normalized_name,),
+            )
+            row = cursor.fetchone()
+            
+            if row:
+                return Entity(
+                    id=row["id"],
+                    entity_type=row["entity_type"],
+                    name=row["name"],
+                    display_name=row["display_name"],
+                    metadata=json.loads(row["metadata"]) if row["metadata"] else None,
+                    first_seen=row["first_seen"],
+                    last_seen=row["last_seen"],
+                    mention_count=row["mention_count"],
+                )
+            
+            return None
+
+    def get_related_entities(
+        self,
+        entity_id: int,
+        rel_type: Optional[str] = None,
+    ) -> List[Entity]:
+        """Get entities related to the given entity.
+        
+        Args:
+            entity_id: ID of the entity to find relations for.
+            rel_type: Optional relationship type filter.
+            
+        Returns:
+            List of related entities.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            if rel_type:
+                cursor.execute(
+                    """
+                    SELECT e.id, e.entity_type, e.name, e.display_name, e.metadata, e.first_seen, e.last_seen, e.mention_count
+                    FROM entities e
+                    JOIN relationships r ON (e.id = r.to_id OR e.id = r.from_id)
+                    WHERE (r.from_id = ? OR r.to_id = ?) AND r.rel_type = ? AND e.id != ?
+                    """,
+                    (entity_id, entity_id, rel_type, entity_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT e.id, e.entity_type, e.name, e.display_name, e.metadata, e.first_seen, e.last_seen, e.mention_count
+                    FROM entities e
+                    JOIN relationships r ON (e.id = r.to_id OR e.id = r.from_id)
+                    WHERE (r.from_id = ? OR r.to_id = ?) AND e.id != ?
+                    """,
+                    (entity_id, entity_id, entity_id),
+                )
+            
+            rows = cursor.fetchall()
+            
+            return [
+                Entity(
+                    id=row["id"],
+                    entity_type=row["entity_type"],
+                    name=row["name"],
+                    display_name=row["display_name"],
+                    metadata=json.loads(row["metadata"]) if row["metadata"] else None,
+                    first_seen=row["first_seen"],
+                    last_seen=row["last_seen"],
+                    mention_count=row["mention_count"],
+                )
+                for row in rows
+            ]
+
+    def get_project_entities(
+        self,
+        project_name: str,
+        days: int = 30,
+    ) -> List[Entity]:
+        """Get all entities used by a project in the last N days.
+        
+        Args:
+            project_name: Name of the project.
+            days: Number of days to look back.
+            
+        Returns:
+            List of entities associated with the project.
+        """
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                """
+                SELECT DISTINCT e.id, e.entity_type, e.name, e.display_name, e.metadata, e.first_seen, e.last_seen, e.mention_count
+                FROM entities e
+                JOIN relationships r ON (e.id = r.to_id OR e.id = r.from_id)
+                JOIN entities proj ON (proj.id = r.from_id OR proj.id = r.to_id)
+                WHERE proj.entity_type = 'project' AND proj.name = ? AND e.last_seen >= ?
+                """,
+                (self._normalize_entity_name(project_name), since),
+            )
+            
+            rows = cursor.fetchall()
+            
+            return [
+                Entity(
+                    id=row["id"],
+                    entity_type=row["entity_type"],
+                    name=row["name"],
+                    display_name=row["display_name"],
+                    metadata=json.loads(row["metadata"]) if row["metadata"] else None,
+                    first_seen=row["first_seen"],
+                    last_seen=row["last_seen"],
+                    mention_count=row["mention_count"],
+                )
+                for row in rows
+            ]
+
+    def get_recent_entities(
+        self,
+        days: int = 30,
+        limit: int = 50,
+    ) -> List[Entity]:
+        """Get recently mentioned entities.
+        
+        Args:
+            days: Number of days to look back.
+            limit: Maximum number of entities to return.
+            
+        Returns:
+            List of recently mentioned entities.
+        """
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                """
+                SELECT id, entity_type, name, display_name, metadata, first_seen, last_seen, mention_count
+                FROM entities
+                WHERE last_seen >= ?
+                ORDER BY last_seen DESC
+                LIMIT ?
+                """,
+                (since, limit),
+            )
+            
+            rows = cursor.fetchall()
+            
+            return [
+                Entity(
+                    id=row["id"],
+                    entity_type=row["entity_type"],
+                    name=row["name"],
+                    display_name=row["display_name"],
+                    metadata=json.loads(row["metadata"]) if row["metadata"] else None,
+                    first_seen=row["first_seen"],
+                    last_seen=row["last_seen"],
+                    mention_count=row["mention_count"],
+                )
+                for row in rows
+            ]
+
+    def get_recent_relationships(
+        self,
+        days: int = 30,
+        limit: int = 30,
+    ) -> List[Relationship]:
+        """Get recent relationships.
+        
+        Args:
+            days: Number of days to look back.
+            limit: Maximum number of relationships to return.
+            
+        Returns:
+            List of recent relationships.
+        """
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                """
+                SELECT id, from_type, from_id, to_type, to_id, rel_type, confidence, created_at
+                FROM relationships
+                WHERE created_at >= ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (since, limit),
+            )
+            
+            rows = cursor.fetchall()
+            
+            return [
+                Relationship(
+                    id=row["id"],
+                    from_type=row["from_type"],
+                    from_id=row["from_id"],
+                    to_type=row["to_type"],
+                    to_id=row["to_id"],
+                    rel_type=row["rel_type"],
+                    confidence=row["confidence"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ]
+
     def insert_event(self, source: str, event_type: str, raw_data: str, event_time: str) -> int:
-        """Insert a single raw event."""
+        """Insert a single raw event. Returns the event ID."""
         conn = self._get_connection()
         cursor = conn.cursor()
         

@@ -163,9 +163,9 @@ PAIS/
 ├── config/           # Configuration management
 ├── processing/       # AI processing logic
 ├── storage/          # Database and Obsidian output
-├── data/             # SQLite database (gitignored)
+├── data/             # SQLite database and OAuth tokens (gitignored)
 ├── logs/             # Log files (gitignored)
-└── config/           # Credentials and tokens (gitignored)
+└── config/           # Credentials and static config (gitignored)
 ```
 
 ### Environment Variables

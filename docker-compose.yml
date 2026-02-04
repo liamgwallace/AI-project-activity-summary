@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  pais:
     build:
       context: .
       dockerfile: Dockerfile
@@ -32,13 +29,13 @@ services:
       
       # Gmail
       - PAIS_GMAIL_CREDENTIALS_PATH=/app/config/gmail_credentials.json
-      - PAIS_GMAIL_TOKEN_PATH=/app/config/gmail_token.json
+      - PAIS_GMAIL_TOKEN_PATH=/app/data/gmail_token.json
       - PAIS_GMAIL_QUERY_DAYS=${PAIS_GMAIL_QUERY_DAYS:-7}
       - PAIS_GMAIL_LABELS=${PAIS_GMAIL_LABELS:-INBOX,SENT}
       
       # Calendar
       - PAIS_CALENDAR_CREDENTIALS_PATH=/app/config/calendar_credentials.json
-      - PAIS_CALENDAR_TOKEN_PATH=/app/config/calendar_token.json
+      - PAIS_CALENDAR_TOKEN_PATH=/app/data/calendar_token.json
       - PAIS_CALENDAR_CALENDARS=${PAIS_CALENDAR_CALENDARS}
       
       # OpenAI

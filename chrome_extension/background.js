@@ -1,5 +1,5 @@
 // PAI Browser Tracker - Background Service Worker
-// Tracks page visits and sends to PAI API
+// Tracks page visits via Chrome History API polling
 
 // Configuration
 const DEFAULT_CONFIG = {
@@ -47,13 +47,12 @@ async function sendVisit(visitData) {
     return;
   }
 
-  // Verbose logging - show what we're about to send
-  console.log('PAI: Sending visit:');
-  console.log('  URL:', visitData.url);
-  console.log('  Title:', visitData.title);
-  console.log('  Device:', visitData.device);
-  console.log('  Timestamp:', visitData.timestamp);
-  console.log('  Endpoint:', config.apiEndpoint);
+  console.log('PAI: Sending visit:', {
+    url: visitData.url,
+    title: visitData.title,
+    timestamp: visitData.timestamp,
+    device: visitData.device
+  });
 
   try {
     const response = await fetch(config.apiEndpoint, {
@@ -66,18 +65,14 @@ async function sendVisit(visitData) {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
     const responseData = await response.json();
-    console.log('PAI: ✅ Visit tracked successfully!');
-    console.log('  Event ID:', responseData.event_id);
-    console.log('  URL:', visitData.url);
-    console.log('  Title:', visitData.title);
+    console.log('PAI: Visit tracked successfully! Event ID:', responseData.event_id);
   } catch (error) {
-    console.error('PAI: ❌ Failed to send visit!');
-    console.error('  URL:', visitData.url);
-    console.error('  Error:', error.message);
+    console.error('PAI: Failed to send visit:', error.message);
     console.warn('PAI: Queuing for retry...');
     offlineQueue.push({
       ...visitData,
@@ -99,13 +94,6 @@ async function retryOfflineQueue() {
   
   for (const visit of queue) {
     try {
-      console.log('PAI: Retrying visit:', {
-        url: visit.url,
-        title: visit.title,
-        timestamp: visit.timestamp,
-        device: visit.device
-      });
-      
       const response = await fetch(config.apiEndpoint, {
         method: 'POST',
         headers: {
@@ -122,7 +110,6 @@ async function retryOfflineQueue() {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`PAI: HTTP ${response.status} error:`, errorText);
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
@@ -141,68 +128,116 @@ async function retryOfflineQueue() {
   chrome.storage.local.set({ offlineQueue });
 }
 
-// Listen for tab updates
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // Only track when page has finished loading
-  if (changeInfo.status !== 'complete') return;
-  
-  // Skip chrome:// URLs and invalid URLs
-  if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+// Query Chrome history for recent visits
+async function pollHistory() {
+  if (!config.enabled) {
+    console.log('PAI: Tracking disabled, skipping history poll');
     return;
   }
 
-  const visitData = {
-    url: tab.url,
-    title: tab.title || 'Untitled',
-    timestamp: new Date().toISOString(),
-    device: getDeviceType()
-  };
+  console.log('PAI: Polling Chrome history...');
+  
+  // Get last sync time
+  const result = await chrome.storage.local.get(['lastHistorySync']);
+  const lastSync = result.lastHistorySync ? new Date(result.lastHistorySync) : new Date(Date.now() - 60000);
+  const now = new Date();
+  
+  // Search history for items visited since last sync
+  chrome.history.search({
+    text: '',
+    startTime: lastSync.getTime(),
+    endTime: now.getTime(),
+    maxResults: 100
+  }, async (historyItems) => {
+    console.log(`PAI: Found ${historyItems.length} history items since last sync`);
+    
+    for (const item of historyItems) {
+      // Skip chrome:// URLs and invalid URLs
+      if (!item.url || item.url.startsWith('chrome://') || item.url.startsWith('chrome-extension://')) {
+        continue;
+      }
 
-  sendVisit(visitData);
+      // Get detailed visit information
+      const visits = await chrome.history.getVisits({ url: item.url });
+      
+      // Filter visits that happened after last sync
+      const newVisits = visits.filter(visit => visit.visitTime > lastSync.getTime());
+      
+      for (const visit of newVisits) {
+        const visitData = {
+          url: item.url,
+          title: item.title || 'Untitled',
+          timestamp: new Date(visit.visitTime).toISOString(),
+          device: getDeviceType(),
+          visitId: visit.visitId,
+          transition: visit.transition
+        };
+
+        await sendVisit(visitData);
+      }
+    }
+    
+    // Update last sync time
+    await chrome.storage.local.set({ lastHistorySync: now.toISOString() });
+    console.log('PAI: History poll completed');
+  });
+}
+
+// Get recent history for display (used by popup)
+async function getRecentHistory(limit = 20) {
+  return new Promise((resolve) => {
+    chrome.history.search({
+      text: '',
+      startTime: Date.now() - (24 * 60 * 60 * 1000), // Last 24 hours
+      maxResults: limit
+    }, async (historyItems) => {
+      const detailedHistory = [];
+      
+      for (const item of historyItems.slice(0, limit)) {
+        if (!item.url || item.url.startsWith('chrome://') || item.url.startsWith('chrome-extension://')) {
+          continue;
+        }
+        
+        detailedHistory.push({
+          url: item.url,
+          title: item.title || 'Untitled',
+          lastVisitTime: item.lastVisitTime,
+          visitCount: item.visitCount
+        });
+      }
+      
+      resolve(detailedHistory);
+    });
+  });
+}
+
+// Set up periodic polling
+chrome.alarms.create('historyPoll', { periodInMinutes: 1 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'historyPoll') {
+    pollHistory();
+  }
 });
 
 // Retry offline queue periodically (every 5 minutes)
-setInterval(retryOfflineQueue, 5 * 60 * 1000);
+chrome.alarms.create('retryQueue', { periodInMinutes: 5 });
 
-// Retry when coming online
-self.addEventListener('online', () => {
-  console.log('PAI: Connection restored, retrying offline queue');
-  retryOfflineQueue();
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'retryQueue') {
+    retryOfflineQueue();
+  }
 });
 
 // Restore offline queue on startup
-chrome.storage.local.get(['offlineQueue'], (result) => {
+chrome.storage.local.get(['offlineQueue', 'lastHistorySync'], (result) => {
   if (result.offlineQueue) {
     offlineQueue = result.offlineQueue;
   }
-});
-
-// Fetch available endpoints from server
-async function fetchServerEndpoints() {
-  const baseUrl = config.baseUrl || 'http://localhost:8000';
   
-  try {
-    const response = await fetch(`${baseUrl}/`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data.endpoints && Array.isArray(data.endpoints)) {
-        // Store available endpoints
-        config.availableEndpoints = data.endpoints;
-        console.log('PAI: Available endpoints loaded:', data.endpoints);
-        return data.endpoints;
-      }
-    }
-  } catch (error) {
-    console.log('PAI: Could not fetch endpoints from server');
-  }
-  return null;
-}
-
-// Fetch endpoints on startup
-fetchServerEndpoints();
-
-// Refresh endpoints periodically (every 30 minutes)
-setInterval(fetchServerEndpoints, 30 * 60 * 1000);
+  // Do initial poll on startup
+  pollHistory();
+});
 
 // Listen for messages from popup.js
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -218,8 +253,64 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       console.error('PAI Background: Error retrying offline queue:', error);
       sendResponse({ success: false, error: error.message });
     });
-    return true; // Required for async sendResponse
+    return true;
+  }
+  
+  if (request.action === 'getRecentHistory') {
+    console.log('PAI Background: Getting recent history');
+    
+    getRecentHistory(request.limit || 20).then((history) => {
+      sendResponse({ success: true, history: history });
+    }).catch((error) => {
+      console.error('PAI Background: Error getting history:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+    return true;
+  }
+  
+  if (request.action === 'pollHistory') {
+    console.log('PAI Background: Manual history poll requested');
+    
+    pollHistory().then(() => {
+      sendResponse({ success: true });
+    }).catch((error) => {
+      console.error('PAI Background: Error polling history:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+    return true;
   }
 });
 
-console.log('PAI: Browser Tracker initialized');
+// Fetch available endpoints from server
+async function fetchServerEndpoints() {
+  const baseUrl = config.baseUrl || 'http://localhost:8000';
+  
+  try {
+    const response = await fetch(`${baseUrl}/`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.endpoints && Array.isArray(data.endpoints)) {
+        config.availableEndpoints = data.endpoints;
+        console.log('PAI: Available endpoints loaded:', data.endpoints);
+        return data.endpoints;
+      }
+    }
+  } catch (error) {
+    console.log('PAI: Could not fetch endpoints from server');
+  }
+  return null;
+}
+
+// Fetch endpoints on startup
+fetchServerEndpoints();
+
+// Refresh endpoints periodically (every 30 minutes)
+chrome.alarms.create('refreshEndpoints', { periodInMinutes: 30 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'refreshEndpoints') {
+    fetchServerEndpoints();
+  }
+});
+
+console.log('PAI: Browser Tracker initialized (History Polling Mode)');

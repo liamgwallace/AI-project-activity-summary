@@ -270,13 +270,13 @@ PAIS_GITHUB_FETCH_REVIEWS=true
 
 # Gmail Integration
 PAIS_GMAIL_CREDENTIALS_PATH=config/gmail_credentials.json
-PAIS_GMAIL_TOKEN_PATH=config/gmail_token.json
+PAIS_GMAIL_TOKEN_PATH=data/gmail_token.json
 PAIS_GMAIL_QUERY_DAYS=7
 PAIS_GMAIL_LABELS=INBOX,SENT
 
 # Google Calendar Integration
 PAIS_CALENDAR_CREDENTIALS_PATH=config/calendar_credentials.json
-PAIS_CALENDAR_TOKEN_PATH=config/calendar_token.json
+PAIS_CALENDAR_TOKEN_PATH=data/calendar_token.json
 PAIS_CALENDAR_CALENDARS=primary,work,personal
 
 # AI Configuration (OpenRouter or OpenAI)
@@ -492,9 +492,33 @@ docker-compose logs -f pais
 ### Volume Persistence
 
 The `docker-compose.yml` mounts these volumes:
-- `./data:/app/data` - Database and vaults
+- `./data:/app/data` - Database, vaults, and OAuth tokens (read-write)
 - `./logs:/app/logs` - Application logs
-- `./config:/app/config:ro` - Configuration (read-only)
+- `./config:/app/config:ro` - Configuration and credentials (read-only)
+
+**Note**: OAuth tokens are stored in `./data/` (not `./config/`) so they can be refreshed by the application while keeping credentials read-only.
+
+### Container Entrypoint
+
+The Docker container uses an entrypoint script (`docker/entrypoint.sh`) that validates your setup before starting the application:
+
+- Checks for required credential files (`gmail_credentials.json`, `calendar_credentials.json`)
+- Verifies OAuth token files exist or will be created
+- Validates environment variables (GitHub token, OpenAI key)
+- Ensures proper directory permissions
+- Checks database initialization
+
+You'll see validation output when the container starts:
+```bash
+docker-compose up
+# Output shows:
+# ✓ Creating required directories...
+# ✓ gmail_credentials.json found
+# ⚠ gmail_token.json not found - will be created on first Gmail auth
+# ✓ PAIS_GITHUB_TOKEN is set
+```
+
+If credentials are missing, the container will start but warn you about disabled integrations.
 
 ### Health Checks
 
@@ -858,7 +882,7 @@ isort .
 **Problem**: `Token has been expired or revoked`
 
 **Solution**:
-1. Delete the token file: `rm config/gmail_token.json`
+1. Delete the token file: `rm data/gmail_token.json`
 2. Run the collector again: `python -m cli.commands test-gmail`
 3. Re-authenticate in the browser window
 
@@ -918,7 +942,7 @@ sqlite3 data/activity_system.db "UPDATE raw_events SET processed = 0;"
 rm -rf data/project-vault/* data/personal-vault/*
 
 # Reset OAuth tokens
-rm config/gmail_token.json config/calendar_token.json
+rm data/gmail_token.json data/calendar_token.json
 ```
 
 ### Getting Help

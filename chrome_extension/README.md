@@ -17,8 +17,10 @@ PAI Browser Tracker is a Chrome extension (Manifest V3) that monitors browsing a
 
 ## Key Features
 
-### Background Script
-- Tracks `chrome.tabs.onUpdated` events
+### Background Script (History Polling Mode)
+- Polls Chrome History API every minute for new visits
+- Captures ALL browser history (desktop + synced mobile visits)
+- Tracks last sync time to avoid duplicates
 - Sends visit data to `http://localhost:8000/api/browser/visit`
 - Implements offline queue with retry logic
 - Detects device type from user agent
@@ -32,6 +34,7 @@ PAI Browser Tracker is a Chrome extension (Manifest V3) that monitors browsing a
 - Device type display
 - **Stats button** - Fetches and displays statistics from `/api/stats` endpoint
 - **Health check button** - Verifies server connectivity via `/api/health` endpoint
+- **View History button** - Displays recent Chrome history (last 24 hours) with timestamps and visit counts
 
 ### Options Page
 - Configure base URL for the PAIS server
@@ -71,7 +74,21 @@ The extension automatically uses the following endpoints based on the configured
 
 ## Usage
 
-The extension automatically tracks page visits when enabled. Data is sent to the PAIS API server. If offline, visits are queued and retried when connection is restored.
+The extension automatically polls Chrome's history every minute when enabled. This captures ALL visits including those synced from mobile Chrome. Data is sent to the PAIS API server. If offline, visits are queued and retried when connection is restored.
+
+### How History Polling Works
+- Extension queries Chrome History API every minute
+- Tracks last sync time to avoid sending duplicates
+- Captures visits from desktop Chrome AND mobile Chrome (via sync)
+- Filters out chrome:// and chrome-extension:// URLs
+- Stores failed sends in offline queue for retry
+
+### View History
+Click the "View History" button to see your recent Chrome history:
+- Shows last 20 visits from past 24 hours
+- Displays page title, URL, and visit time
+- Shows visit count for each page
+- Useful for verifying the extension can see your history
 
 ### Stats Button
 Click the "Show Stats" button in the popup to fetch and display:
@@ -87,6 +104,8 @@ Click the "Check Health" button to verify server connectivity and display:
 
 ## Permissions
 
+- `history` - Read Chrome browsing history
+- `alarms` - Schedule periodic history polling
 - `tabs` - Access tab information
 - `storage` - Store configuration and offline queue
 - `activeTab` - Access current tab

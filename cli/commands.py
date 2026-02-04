@@ -210,6 +210,61 @@ def test_calendar(args):
         return 1
 
 
+def test_youtube(args):
+    """Test YouTube API connection and fetch liked videos."""
+    print("Testing YouTube integration...")
+    settings = get_settings()
+    
+    if not settings.youtube.credentials_path:
+        print("Error: PAIS_YOUTUBE_CREDENTIALS_PATH not set")
+        return 1
+    
+    try:
+        from collectors.youtube_collector import YouTubeCollector
+        
+        collector = YouTubeCollector(credentials_path=settings.youtube.credentials_path)
+        result = collector.test()
+        
+        if result["success"]:
+            print(f"[OK] {result['message']}")
+
+            if result["sample_events"]:
+                print("\nRecent liked videos (non-Shorts):")
+                for event in result["sample_events"]:
+                    data = event.get("data", {})
+                    print(f"  - {data.get('channel', 'Unknown')}: {data.get('title', 'Unknown')[:60]}")
+                    print(f"    URL: {data.get('url', 'N/A')}")
+
+            # Store in database if requested
+            if args.store and result["sample_events"]:
+                db = Database(settings.database.path)
+                events_to_insert = []
+                for event in result["sample_events"]:
+                    events_to_insert.append((
+                        event.get("source", "youtube"),
+                        event.get("event_type", "video_like"),
+                        json.dumps(event.get("data", {})),
+                        event.get("timestamp", datetime.now().isoformat()),
+                    ))
+                inserted = db.insert_events(events_to_insert)
+                print(f"\nStored {inserted} events to database")
+
+            print("\nYouTube test completed successfully!")
+            return 0
+        else:
+            print(f"[FAIL] Test failed: {result['message']}")
+            return 1
+        
+    except ImportError as e:
+        print(f"Error: Required library not installed: {e}")
+        return 1
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def test_db(args):
     """Test database connection and operations."""
     print("Testing database...")
@@ -306,22 +361,26 @@ def test_ai(args):
 def collect_all(args):
     """Collect data from all sources."""
     print("Collecting data from all sources...")
-    
+
     # Run all collectors
     result = 0
-    
+
     if not args.skip_github:
         print("\n--- GitHub ---")
         result |= test_github(argparse.Namespace(store=True))
-    
+
     if not args.skip_gmail:
         print("\n--- Gmail ---")
         result |= test_gmail(argparse.Namespace())
-    
+
     if not args.skip_calendar:
         print("\n--- Calendar ---")
         result |= test_calendar(argparse.Namespace())
-    
+
+    if not args.skip_youtube:
+        print("\n--- YouTube ---")
+        result |= test_youtube(argparse.Namespace(store=True))
+
     print("\nCollection completed!")
     return result
 
@@ -517,6 +576,93 @@ def generate_logs(args):
         return 1
 
 
+def weekly_synthesis(args):
+    """Run weekly synthesis to generate project summaries."""
+    print("Running weekly synthesis...")
+    settings = get_settings()
+    
+    try:
+        from processing.ai_processor import AIProcessor
+        from storage.obsidian_writer import ObsidianWriter
+        from pathlib import Path
+        
+        db = Database(settings.database.path)
+        
+        # Initialize components
+        processor = AIProcessor()
+        project_vault = settings.obsidian.project_vault or str(Path(settings.data_dir) / "project-vault")
+        personal_vault = settings.obsidian.personal_vault or str(Path(settings.data_dir) / "personal-vault")
+        obsidian_writer = ObsidianWriter(
+            project_vault=str(project_vault),
+            personal_vault=str(personal_vault),
+        )
+        
+        # Get date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=args.days)
+        
+        print(f"Analyzing activities from {start_date.date()} to {end_date.date()}")
+        
+        # Process each active project
+        project_count = 0
+        for project_name in settings.projects.keys():
+            # Get activities for this project
+            activities = db.get_activities_for_period(
+                start=start_date,
+                end=end_date,
+                project_name=project_name,
+            )
+            
+            if not activities:
+                print(f"  Skipping {project_name} - no activities")
+                continue
+            
+            print(f"\nProcessing {project_name} ({len(activities)} activities)...")
+            
+            # Read current README if exists
+            project_folder = obsidian_writer.ensure_project_folder(project_name)
+            readme_file = project_folder / "README.md"
+            current_readme = ""
+            if readme_file.exists():
+                current_readme = readme_file.read_text(encoding="utf-8")
+            
+            # Generate weekly summary
+            try:
+                weekly_summary = processor.weekly_synthesis(
+                    project_name=project_name,
+                    activities=activities,
+                    current_readme=current_readme,
+                )
+                
+                # Get project entities for README enhancement
+                project_entities = []
+                try:
+                    from storage.database import Entity
+                    project_entities = db.get_project_entities(project_name, days=args.days)
+                    print(f"  Found {len(project_entities)} entities")
+                except Exception as e:
+                    print(f"  Warning: Could not retrieve entities: {e}")
+                
+                # Update README
+                obsidian_writer.update_project_readme(project_name, weekly_summary, entities=project_entities)
+                print(f"  [OK] Updated README for {project_name}")
+                project_count += 1
+                
+            except Exception as e:
+                print(f"  [FAIL] Error processing {project_name}: {e}")
+                continue
+        
+        print(f"\n[SUCCESS] Weekly synthesis complete!")
+        print(f"Updated {project_count} project READMEs")
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def test_obsidian(args):
     """Test Obsidian vault write/read functionality."""
     print("Testing Obsidian vault integration...")
@@ -699,6 +845,10 @@ def main():
     # test-calendar command
     subparsers.add_parser("test-calendar", help="Test Calendar integration")
     
+    # test-youtube command
+    youtube_parser = subparsers.add_parser("test-youtube", help="Test YouTube integration")
+    youtube_parser.add_argument("--store", action="store_true", help="Store results in database")
+    
     # test-db command
     subparsers.add_parser("test-db", help="Test database operations")
     
@@ -716,6 +866,7 @@ def main():
     collect_parser.add_argument("--skip-github", action="store_true", help="Skip GitHub")
     collect_parser.add_argument("--skip-gmail", action="store_true", help="Skip Gmail")
     collect_parser.add_argument("--skip-calendar", action="store_true", help="Skip Calendar")
+    collect_parser.add_argument("--skip-youtube", action="store_true", help="Skip YouTube")
     
     # process-now command
     process_parser = subparsers.add_parser("process-now", help="Process unprocessed events")
@@ -737,6 +888,10 @@ def main():
     logs_parser.add_argument("--project", help="Filter by project name")
     logs_parser.add_argument("--output", "-o", help="Output file path")
     
+    # weekly-synthesis command
+    synthesis_parser = subparsers.add_parser("weekly-synthesis", help="Run weekly synthesis for project summaries")
+    synthesis_parser.add_argument("--days", type=int, default=7, help="Days to analyze (default: 7)")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -748,6 +903,7 @@ def main():
         "test-github": test_github,
         "test-gmail": test_gmail,
         "test-calendar": test_calendar,
+        "test-youtube": test_youtube,
         "test-db": test_db,
         "test-ai": test_ai,
         "test-obsidian": test_obsidian,
@@ -756,6 +912,7 @@ def main():
         "show-events": show_events,
         "show-stats": show_stats,
         "generate-logs": generate_logs,
+        "weekly-synthesis": weekly_synthesis,
     }
     
     # Load settings before running command

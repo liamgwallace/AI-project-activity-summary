@@ -34,7 +34,7 @@ class GithubConfig:
 @dataclass
 class GmailConfig:
     credentials_path: str = ""
-    token_path: str = "config/gmail_token.json"
+    token_path: str = "data/gmail_token.json"
     query_days: int = 7
     labels: list = field(default_factory=lambda: ["INBOX", "SENT"])
 
@@ -42,8 +42,15 @@ class GmailConfig:
 @dataclass
 class CalendarConfig:
     credentials_path: str = ""
-    token_path: str = "config/calendar_token.json"
+    token_path: str = "data/calendar_token.json"
     calendars: list = field(default_factory=list)
+
+
+@dataclass
+class YouTubeConfig:
+    credentials_path: str = ""
+    token_path: str = "data/youtube_token.json"
+    min_duration_seconds: int = 60  # Filter out videos shorter than this
 
 
 @dataclass
@@ -84,6 +91,7 @@ class Settings:
     github: GithubConfig = field(default_factory=GithubConfig)
     gmail: GmailConfig = field(default_factory=GmailConfig)
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
+    youtube: YouTubeConfig = field(default_factory=YouTubeConfig)
     openai: OpenAIConfig = field(default_factory=OpenAIConfig)
     obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
     projects: Dict[str, Project] = field(default_factory=dict)
@@ -123,13 +131,18 @@ def load_settings(config_file: Optional[str] = None) -> Settings:
     
     # Gmail config
     settings.gmail.credentials_path = os.getenv("PAIS_GMAIL_CREDENTIALS_PATH", "")
-    settings.gmail.token_path = os.getenv("PAIS_GMAIL_TOKEN_PATH", "config/gmail_token.json")
+    settings.gmail.token_path = os.getenv("PAIS_GMAIL_TOKEN_PATH", "data/gmail_token.json")
     if os.getenv("PAIS_GMAIL_LABELS"):
         settings.gmail.labels = os.getenv("PAIS_GMAIL_LABELS", "").split(",")
     
     # Calendar config
     settings.calendar.credentials_path = os.getenv("PAIS_CALENDAR_CREDENTIALS_PATH", "")
-    settings.calendar.token_path = os.getenv("PAIS_CALENDAR_TOKEN_PATH", "config/calendar_token.json")
+    settings.calendar.token_path = os.getenv("PAIS_CALENDAR_TOKEN_PATH", "data/calendar_token.json")
+    
+    # YouTube config
+    settings.youtube.credentials_path = os.getenv("PAIS_YOUTUBE_CREDENTIALS_PATH", "")
+    settings.youtube.token_path = os.getenv("PAIS_YOUTUBE_TOKEN_PATH", "data/youtube_token.json")
+    settings.youtube.min_duration_seconds = int(os.getenv("PAIS_YOUTUBE_MIN_DURATION", "60"))
     
     # OpenAI config
     settings.openai.api_key = os.getenv("PAIS_OPENAI_API_KEY", "")
@@ -188,6 +201,11 @@ def _merge_config_data(settings: Settings, data: Dict[str, Any]) -> Settings:
         for key, value in data["calendar"].items():
             if hasattr(settings.calendar, key):
                 setattr(settings.calendar, key, value)
+    
+    if "youtube" in data:
+        for key, value in data["youtube"].items():
+            if hasattr(settings.youtube, key):
+                setattr(settings.youtube, key, value)
     
     if "openai" in data:
         for key, value in data["openai"].items():

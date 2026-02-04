@@ -34,6 +34,7 @@ async function init() {
   document.getElementById('sync-btn').addEventListener('click', syncNow);
   document.getElementById('stats-btn').addEventListener('click', toggleStats);
   document.getElementById('health-btn').addEventListener('click', checkHealth);
+  document.getElementById('history-btn').addEventListener('click', toggleHistory);
 }
 
 // Update UI elements
@@ -228,6 +229,109 @@ async function checkHealth() {
       healthBtn.disabled = false;
     }, 2000);
   }
+}
+
+// Toggle history display
+async function toggleHistory() {
+  const historySection = document.getElementById('history-section');
+  const historyBtn = document.getElementById('history-btn');
+  
+  if (historySection.style.display === 'none') {
+    historyBtn.textContent = 'Loading...';
+    historyBtn.disabled = true;
+    
+    try {
+      await displayHistory();
+      historySection.style.display = 'block';
+      historyBtn.textContent = 'Hide History';
+    } catch (error) {
+      console.error('Failed to load history:', error);
+      historyBtn.textContent = 'Error';
+      setTimeout(() => {
+        historyBtn.textContent = 'View History';
+      }, 2000);
+    } finally {
+      historyBtn.disabled = false;
+    }
+  } else {
+    historySection.style.display = 'none';
+    historyBtn.textContent = 'View History';
+  }
+}
+
+// Fetch and display recent history
+async function displayHistory() {
+  const historyList = document.getElementById('history-list');
+  historyList.innerHTML = '<div style="color: #666;">Loading...</div>';
+  
+  try {
+    // Request history from background script
+    const response = await chrome.runtime.sendMessage({ 
+      action: 'getRecentHistory',
+      limit: 10 
+    });
+    
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to fetch history');
+    }
+    
+    const history = response.history;
+    
+    if (history.length === 0) {
+      historyList.innerHTML = '<div style="color: #666;">No recent history found</div>';
+      return;
+    }
+    
+    // Build history HTML
+    let html = '';
+    history.forEach(item => {
+      const time = formatTime(item.lastVisitTime);
+      const title = escapeHtml(item.title || 'Untitled');
+      const url = escapeHtml(item.url);
+      const shortUrl = url.length > 50 ? url.substring(0, 50) + '...' : url;
+      
+      html += `
+        <div class="history-item">
+          <div class="history-title">${title}</div>
+          <div class="history-url">${shortUrl}</div>
+          <div class="history-time">${time} · ${item.visitCount} visit${item.visitCount !== 1 ? 's' : ''}</div>
+        </div>
+      `;
+    });
+    
+    historyList.innerHTML = html;
+    
+  } catch (error) {
+    console.error('Error displaying history:', error);
+    historyList.innerHTML = `<div style="color: #c62828;">Error: ${error.message}</div>`;
+    throw error;
+  }
+}
+
+// Format timestamp to readable string
+function formatTime(timestamp) {
+  if (!timestamp) return 'Unknown';
+  
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  
+  return date.toLocaleDateString();
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Initialize when DOM is ready

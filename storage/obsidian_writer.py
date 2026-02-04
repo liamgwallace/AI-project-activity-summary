@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from storage.database import Entity
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +43,39 @@ class ObsidianWriter:
         name = re.sub(r"[^a-zA-Z0-9-]", "", name)
         # Convert to lowercase
         return name.lower()
+
+    def _format_activity_with_links(self, description: str, entity_map: Dict[str, Entity]) -> str:
+        """
+        Replace entity names in description with wiki-links.
+
+        Args:
+            description: The activity description
+            entity_map: Dictionary mapping lowercase entity names to Entity objects
+
+        Returns:
+            Description with entity names replaced by wiki-links
+        """
+        if not entity_map:
+            return description
+
+        # Sort entities by name length (descending) to avoid partial matches
+        sorted_entities = sorted(entity_map.items(), key=lambda x: len(x[0]), reverse=True)
+        result = description
+
+        for entity_name_lower, entity in sorted_entities:
+            # Create wiki-link format
+            if entity.display_name and entity.display_name != entity.name:
+                wiki_link = f"[[{entity.name}|{entity.display_name}]]"
+            else:
+                wiki_link = f"[[{entity.name}]]"
+
+            # Use word boundary regex for whole word matching
+            # Escape special regex characters in entity name
+            escaped_name = re.escape(entity.name)
+            pattern = rf'\b{escaped_name}\b'
+            result = re.sub(pattern, wiki_link, result, flags=re.IGNORECASE)
+
+        return result
 
     def _format_frontmatter(self, data: Dict[str, Any]) -> str:
         """Format a dictionary as YAML frontmatter."""
@@ -80,6 +115,7 @@ class ObsidianWriter:
         self,
         project_name: str,
         activities: List[Dict[str, Any]],
+        entities: Optional[List[Entity]] = None,
     ) -> Path:
         """
         Generate/overwrite activity-log.md in the project folder.
@@ -87,6 +123,7 @@ class ObsidianWriter:
         Args:
             project_name: Name of the project
             activities: List of activity dictionaries with date, description, technologies
+            entities: Optional list of entities for generating wiki-links and tags
 
         Returns:
             Path to the created file
@@ -94,13 +131,31 @@ class ObsidianWriter:
         project_folder = self.ensure_project_folder(project_name)
         log_file = project_folder / "activity-log.md"
 
+        # Build entity lookup map
+        entity_map: Dict[str, Entity] = {}
+        tags: List[str] = []
+        if entities:
+            for entity in entities:
+                entity_map[entity.name.lower()] = entity
+                if entity.display_name and entity.display_name.lower() != entity.name.lower():
+                    entity_map[entity.display_name.lower()] = entity
+                # Generate tags from entity types
+                if entity.entity_type in ("technology", "concept"):
+                    tag = entity.name.lower().replace(" ", "-").replace("_", "-")
+                    if tag not in tags:
+                        tags.append(tag)
+
         # Build the markdown content
+        frontmatter_data: Dict[str, Any] = {
+            "project": project_name,
+            "created": datetime.now().isoformat(),
+            "type": "activity-log",
+        }
+        if tags:
+            frontmatter_data["tags"] = tags[:20]  # Limit to 20 tags
+
         lines = [
-            self._format_frontmatter({
-                "project": project_name,
-                "created": datetime.now().isoformat(),
-                "type": "activity-log",
-            }),
+            self._format_frontmatter(frontmatter_data),
             "",
             f"# Activity Log: {project_name}",
             "",
@@ -126,6 +181,10 @@ class ObsidianWriter:
                 description = activity.get("description", "No description")
                 activity_type = activity.get("type", activity.get("activity_type", "activity"))
                 technologies = activity.get("technologies", activity.get("tech", []))
+
+                # Format description with wiki-links if entities provided
+                if entity_map:
+                    description = self._format_activity_with_links(description, entity_map)
 
                 lines.append(f"- **[{activity_type}]** {description}")
 
@@ -200,6 +259,7 @@ class ObsidianWriter:
         self,
         project_name: str,
         weekly_summary: str,
+        entities: Optional[List[Entity]] = None,
     ) -> Path:
         """
         Prepend a weekly section to the project's README.md.
@@ -207,12 +267,26 @@ class ObsidianWriter:
         Args:
             project_name: Name of the project
             weekly_summary: Markdown content for the weekly summary
+            entities: Optional list of entities for adding Technologies and Concepts sections
 
         Returns:
             Path to the README file
         """
         project_folder = self.ensure_project_folder(project_name)
         readme_file = project_folder / "README.md"
+
+        # Build entity lookup map
+        entity_map: Dict[str, Entity] = {}
+        technologies: List[Entity] = []
+        concepts: List[Entity] = []
+
+        if entities:
+            for entity in entities:
+                entity_map[entity.name.lower()] = entity
+                if entity.entity_type == "technology":
+                    technologies.append(entity)
+                elif entity.entity_type == "concept":
+                    concepts.append(entity)
 
         # Create or read existing README
         if readme_file.exists():
@@ -228,6 +302,30 @@ class ObsidianWriter:
         # Generate the weekly section header
         week_header = f"## Week of {datetime.now().strftime('%b %d, %Y')}"
         
+        # Build weekly summary with entity sections
+        weekly_content = weekly_summary
+
+        # Add Technologies Used section
+        if technologies:
+            tech_links = []
+            for tech in technologies:
+                if tech.display_name and tech.display_name != tech.name:
+                    tech_links.append(f"[[{tech.name}|{tech.display_name}]]")
+                else:
+                    tech_links.append(f"[[{tech.name}]]")
+            weekly_content += f"\n\n**Technologies Used:** {', '.join(tech_links)}"
+
+        # Add Related Concepts section
+        if concepts:
+            concept_links = []
+            # Limit to top 10 concepts
+            for concept in concepts[:10]:
+                if concept.display_name and concept.display_name != concept.name:
+                    concept_links.append(f"[[{concept.name}|{concept.display_name}]]")
+                else:
+                    concept_links.append(f"[[{concept.name}]]")
+            weekly_content += f"\n\n**Related Concepts:** {', '.join(concept_links)}"
+
         # Check if this week's section already exists
         if week_header in existing_content:
             # Replace existing week section
@@ -241,7 +339,7 @@ class ObsidianWriter:
                         # This is the current week, start replacement
                         new_lines.append(week_header)
                         new_lines.append("")
-                        new_lines.append(weekly_summary)
+                        new_lines.append(weekly_content)
                         skip_until_next_week = True
                     elif skip_until_next_week:
                         # Found next week section, stop skipping
@@ -272,7 +370,7 @@ class ObsidianWriter:
                 "",
                 week_header,
                 "",
-                weekly_summary,
+                weekly_content,
             ]
             lines = lines[:insert_index] + weekly_section + lines[insert_index:]
             existing_content = "\n".join(lines)
@@ -281,6 +379,124 @@ class ObsidianWriter:
         logger.info(f"Updated README for {project_name} with weekly summary")
 
         return readme_file
+
+    def write_entity_note(
+        self,
+        entity: Entity,
+        related_entities: Optional[List[Entity]] = None,
+        projects: Optional[List[str]] = None,
+    ) -> Path:
+        """
+        Create an individual note file for an entity.
+
+        Args:
+            entity: The entity to create a note for
+            related_entities: Optional list of related entities to link
+            projects: Optional list of project names where this entity is used
+
+        Returns:
+            Path to the created note file
+        """
+        # Only create notes for technology and concept types
+        if entity.entity_type not in ("technology", "concept"):
+            logger.debug(f"Skipping entity note for {entity.entity_type}: {entity.name}")
+            return self.personal_vault / f"entities/{entity.name}.md"
+
+        # Create entities directory
+        entities_dir = self.personal_vault / "entities"
+        entities_dir.mkdir(parents=True, exist_ok=True)
+
+        # Sanitize filename
+        safe_name = self._to_kebab_case(entity.name)
+        note_file = entities_dir / f"{safe_name}.md"
+
+        # Build tags
+        tags = [entity.entity_type]
+        if entity.metadata and "category" in entity.metadata:
+            tags.append(entity.metadata["category"])
+
+        # Build frontmatter
+        frontmatter_data: Dict[str, Any] = {
+            "type": "entity",
+            "entity_type": entity.entity_type,
+            "entity_name": entity.name,
+            "created": datetime.now().isoformat(),
+            "tags": tags,
+        }
+        if entity.first_seen:
+            frontmatter_data["first_seen"] = entity.first_seen
+        if entity.last_seen:
+            frontmatter_data["last_seen"] = entity.last_seen
+        if entity.mention_count > 0:
+            frontmatter_data["mention_count"] = entity.mention_count
+
+        # Build content
+        lines = [
+            self._format_frontmatter(frontmatter_data),
+            "",
+        ]
+
+        # Title with display name if different
+        if entity.display_name and entity.display_name != entity.name:
+            lines.append(f"# {entity.display_name}")
+            lines.append(f"\n**Canonical Name:** {entity.name}")
+        else:
+            lines.append(f"# {entity.name}")
+
+        lines.append("")
+
+        # Description section
+        if entity.metadata and "description" in entity.metadata:
+            lines.append("## Description")
+            lines.append("")
+            lines.append(entity.metadata["description"])
+            lines.append("")
+
+        # Metadata section
+        if entity.metadata and any(k != "description" for k in entity.metadata.keys()):
+            lines.append("## Metadata")
+            lines.append("")
+            for key, value in entity.metadata.items():
+                if key != "description":
+                    if isinstance(value, list):
+                        lines.append(f"- **{key}:** {', '.join(str(v) for v in value)}")
+                    else:
+                        lines.append(f"- **{key}:** {value}")
+            lines.append("")
+
+        # Projects section
+        if projects:
+            lines.append("## Used In Projects")
+            lines.append("")
+            for project in projects:
+                project_folder = self._to_kebab_case(project)
+                lines.append(f"- [[{project_folder}/README|{project}]]")
+            lines.append("")
+
+        # Related Entities section
+        if related_entities:
+            lines.append("## Related")
+            lines.append("")
+            for related in related_entities:
+                if related.entity_type in ("technology", "concept"):
+                    related_safe_name = self._to_kebab_case(related.name)
+                    if related.display_name and related.display_name != related.name:
+                        lines.append(f"- [[entities/{related_safe_name}|{related.display_name}]] ({related.entity_type})")
+                    else:
+                        lines.append(f"- [[entities/{related_safe_name}|{related.name}]] ({related.entity_type})")
+            lines.append("")
+
+        # Footer with timestamps
+        lines.append("---")
+        lines.append("")
+        lines.append(f"*Entity note generated on {datetime.now().strftime('%Y-%m-%d')}*")
+
+        # Write the file
+        content = "\n".join(lines)
+        note_file.write_text(content, encoding="utf-8")
+        logger.info(f"Wrote entity note to {note_file}")
+
+        return note_file
 
     def write_tweet_drafts(
         self,

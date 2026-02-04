@@ -26,6 +26,10 @@ COPY collectors/ ./collectors/
 COPY processing/ ./processing/
 COPY main.py ./
 
+# Copy and set up entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Create necessary directories
 RUN mkdir -p data logs config
 
@@ -42,6 +46,9 @@ EXPOSE 8000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Default command - run the main scheduler and API server
 CMD ["python", "main.py"]

@@ -7,7 +7,7 @@ processing daily activity batches and generating weekly summaries.
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from config.settings import get_settings, get_model_config
-from storage.database import Database, RawEvent, Activity
+from storage.database import Database, RawEvent, Activity, Entity, Relationship
 from processing.prompts.daily_process import DAILY_PROCESS_PROMPT
 from processing.prompts.weekly_synthesis import WEEKLY_SYNTHESIS_PROMPT
 
@@ -34,6 +34,8 @@ class ProcessingResult:
     output_tokens: int
     success: bool = True
     error_message: Optional[str] = None
+    new_entities: List[Dict[str, Any]] = field(default_factory=list)
+    entity_relationships: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class AIProcessor:
@@ -136,16 +138,26 @@ class AIProcessor:
             result = self._parse_response(response.content)
             result.input_tokens = input_tokens
             result.output_tokens = output_tokens
-            
+
             logger.info(
                 f"Processed {len(events)} events into "
                 f"{len(result.activities)} activities, "
-                f"{len(result.new_projects)} new projects"
+                f"{len(result.new_projects)} new projects, "
+                f"{len(result.new_entities)} new entities, "
+                f"{len(result.entity_relationships)} relationships"
             )
-            
+
+            # Store entities and relationships (activities will be stored separately)
+            if result.new_entities or result.entity_relationships:
+                try:
+                    self._store_entities_and_relationships(result, {})
+                except Exception as store_error:
+                    logger.error(f"Error storing entities/relationships: {store_error}")
+                    # Don't fail the whole batch if entity storage fails
+
             # Record token usage
             self._record_usage("daily_process", input_tokens, output_tokens)
-            
+
             return result
             
         except Exception as e:
@@ -165,35 +177,34 @@ class AIProcessor:
         project_name: str,
         activities: List[Activity],
         current_readme: str,
+        project_entities: str = "",
+        related_context: str = "",
     ) -> str:
         """
         Generate weekly summary for a project.
-        
+
         Args:
             project_name: Name of the project
             activities: List of activities from the week
             current_readme: Current README content for context
-            
+            project_entities: Entity context for the project (technologies, concepts)
+            related_context: Related entities and cross-project context
+
         Returns:
             Markdown string with weekly summary
         """
         if not activities:
             logger.warning(f"No activities for {project_name} weekly synthesis")
             return f"## Week of {datetime.now().strftime('%b %d, %Y')}\n\nNo recorded activities this week."
-        
+
         try:
-            # Build activities string
-            activities_str = ""
-            for activity in activities:
-                activities_str += f"- [{activity.activity_type}] {activity.description}\n"
-                activities_str += f"  Date: {activity.timestamp[:10]}\n"
-            
-            # Format the prompt
-            prompt = WEEKLY_SYNTHESIS_PROMPT.format(
+            # Build the prompt with entity context
+            prompt = self._build_weekly_prompt(
                 project_name=project_name,
-                current_readme=current_readme or "No existing README",
-                activities=activities_str,
-                date=datetime.now().strftime("%Y-%m-%d"),
+                activities=activities,
+                current_readme=current_readme,
+                project_entities=project_entities,
+                related_context=related_context,
             )
             
             # Send to AI
@@ -216,6 +227,63 @@ class AIProcessor:
             logger.error(f"Error generating weekly synthesis for {project_name}: {e}")
             return f"## Week of {datetime.now().strftime('%b %d, %Y')}\n\nError generating summary: {e}"
     
+    def _build_weekly_prompt(
+        self,
+        project_name: str,
+        activities: List[Activity],
+        current_readme: str,
+        project_entities: str,
+        related_context: str,
+    ) -> str:
+        """
+        Build the weekly synthesis prompt from template.
+
+        Args:
+            project_name: Name of the project
+            activities: List of activities from the week
+            current_readme: Current README content for context
+            project_entities: Entity context for the project
+            related_context: Related entities and cross-project context
+
+        Returns:
+            Formatted prompt string
+        """
+        # Build activities string
+        activities_str = ""
+        for activity in activities:
+            activities_str += f"- [{activity.activity_type}] {activity.description}\n"
+            activities_str += f"  Date: {activity.timestamp[:10]}\n"
+
+        # Format the prompt with entity context
+        return WEEKLY_SYNTHESIS_PROMPT.format(
+            project_name=project_name,
+            project_entities=project_entities or "No project entities recorded.",
+            related_context=related_context or "No related context available.",
+            current_readme=current_readme or "No existing README",
+            activities=activities_str,
+            date=datetime.now().strftime("%Y-%m-%d"),
+        )
+
+    def _format_entities(self, entities: List[Entity]) -> str:
+        """Format entity list for prompt."""
+        if not entities:
+            return "No existing entities."
+        
+        result = []
+        for entity in entities:
+            result.append(f"- {entity.name} ({entity.entity_type})")
+        return "\n".join(result)
+    
+    def _format_relationships(self, relationships: List[Relationship]) -> str:
+        """Format relationship list for prompt."""
+        if not relationships:
+            return "No existing relationships."
+        
+        result = []
+        for rel in relationships:
+            result.append(f"- {rel.from_type}:{rel.from_id} -> {rel.to_type}:{rel.to_id} ({rel.rel_type})")
+        return "\n".join(result)
+
     def _build_daily_prompt(
         self,
         events: List[RawEvent],
@@ -223,11 +291,11 @@ class AIProcessor:
     ) -> str:
         """
         Build the daily processing prompt from template.
-        
+
         Args:
             events: List of raw events
             projects: Dictionary of existing projects
-            
+
         Returns:
             Formatted prompt string
         """
@@ -243,16 +311,30 @@ class AIProcessor:
                 projects_str += "\n"
         else:
             projects_str = "No existing projects."
-        
+
+        # Retrieve and format entity context
+        try:
+            db = Database()
+            recent_entities = db.get_recent_entities(days=30, limit=50)
+            recent_relationships = db.get_recent_relationships(days=30, limit=30)
+            entities_str = self._format_entities(recent_entities)
+            relationships_str = self._format_relationships(recent_relationships)
+        except Exception as e:
+            logger.warning(f"Failed to retrieve entity context: {e}")
+            entities_str = "No existing entities."
+            relationships_str = "No existing relationships."
+
         # Format events
         events_str = ""
         for event in events:
             events_str += f"[{event.source}/{event.event_type}] {event.event_time}\n"
             events_str += f"{event.raw_data}\n"
             events_str += "---\n"
-        
+
         return DAILY_PROCESS_PROMPT.format(
             existing_projects=projects_str,
+            existing_entities=entities_str,
+            recent_relationships=relationships_str,
             events=events_str,
         )
     
@@ -282,7 +364,7 @@ class AIProcessor:
                 json_str = response.strip()
             
             data = json.loads(json_str)
-            
+
             return ProcessingResult(
                 activities=data.get("activities", []),
                 new_projects=data.get("new_projects", []),
@@ -290,6 +372,8 @@ class AIProcessor:
                 input_tokens=0,
                 output_tokens=0,
                 success=True,
+                new_entities=data.get("new_entities", []),
+                entity_relationships=data.get("entity_relationships", []),
             )
             
         except json.JSONDecodeError as e:
@@ -318,6 +402,81 @@ class AIProcessor:
                 error_message=str(e),
             )
     
+    def _store_entities_and_relationships(
+        self,
+        result: ProcessingResult,
+        entity_id_map: Dict[str, int],
+    ) -> None:
+        """
+        Store entities and relationships from processing result.
+        
+        Args:
+            result: ProcessingResult containing entities and relationships
+            entity_id_map: Dictionary mapping entity names to IDs
+        """
+        try:
+            db = Database(self.settings.database.path)
+            
+            # Store new entities
+            if result.new_entities:
+                logger.info(f"Storing {len(result.new_entities)} entities...")
+                for entity_data in result.new_entities:
+                    entity_name = entity_data.get("name", "").lower()
+                    entity_type = entity_data.get("type", "unknown")
+                    display_name = entity_data.get("display_name")
+                    metadata = entity_data.get("metadata", {})
+                    
+                    if entity_name:
+                        entity_id = db.get_or_create_entity(
+                            name=entity_name,
+                            entity_type=entity_type,
+                            display_name=display_name,
+                            metadata=metadata,
+                        )
+                        entity_id_map[entity_name] = entity_id
+                        logger.debug(f"Stored entity: {entity_name} (type: {entity_type}, id: {entity_id})")
+                
+                logger.info(f"Successfully stored {len(entity_id_map)} entities")
+            
+            # Store entity relationships
+            if result.entity_relationships and entity_id_map:
+                logger.info(f"Storing {len(result.entity_relationships)} entity relationships...")
+                for rel in result.entity_relationships:
+                    from_entity = rel.get("from_entity", "").lower()
+                    to_entity = rel.get("to_entity", "").lower()
+                    rel_type = rel.get("type", "related_to")
+                    confidence = rel.get("confidence", 1.0)
+                    
+                    # Get entity IDs (entities must exist in our map)
+                    from_id = entity_id_map.get(from_entity)
+                    to_id = entity_id_map.get(to_entity)
+                    
+                    if from_id and to_id:
+                        # Determine entity types from the new_entities data
+                        from_type = "unknown"
+                        to_type = "unknown"
+                        for entity_data in result.new_entities:
+                            if entity_data.get("name", "").lower() == from_entity:
+                                from_type = entity_data.get("type", "unknown")
+                            if entity_data.get("name", "").lower() == to_entity:
+                                to_type = entity_data.get("type", "unknown")
+                        
+                        db.create_relationship(
+                            from_type=from_type,
+                            from_id=from_id,
+                            to_type=to_type,
+                            to_id=to_id,
+                            rel_type=rel_type,
+                            confidence=confidence,
+                        )
+                        logger.debug(f"Stored relationship: {from_entity} -> {to_entity} ({rel_type})")
+                
+                logger.info(f"Successfully stored entity relationships")
+                
+        except Exception as e:
+            logger.error(f"Error storing entities/relationships: {e}")
+            raise
+
     def _record_usage(
         self,
         operation: str,

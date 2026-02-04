@@ -23,11 +23,12 @@ from api.server import app
 from collectors.calendar_collector import CalendarCollector
 from collectors.gmail_collector import GmailCollector
 from collectors.github_collector import GitHubCollector
+from collectors.youtube_collector import YouTubeCollector
 from config.settings import get_settings, load_settings, Project, save_project
 from processing.ai_processor import AIProcessor, ProcessingResult
 from processing.batch_manager import BatchManager
 from processing.project_detector import ProjectDetector
-from storage.database import Database, Activity
+from storage.database import Database, Activity, Entity
 from storage.obsidian_writer import ObsidianWriter
 
 # Global components for graceful shutdown
@@ -143,6 +144,21 @@ def run_collectors() -> None:
     else:
         logger.warning("Calendar credentials not configured, skipping Calendar collection")
 
+    # YouTube Collector
+    if settings.youtube.credentials_path and Path(settings.youtube.credentials_path).exists():
+        try:
+            logger.info("Collecting YouTube liked videos...")
+            youtube_collector = YouTubeCollector(
+                credentials_path=settings.youtube.credentials_path,
+            )
+            youtube_events = youtube_collector.collect(since=since)
+            all_events.extend(youtube_events)
+            logger.info(f"YouTube: collected {len(youtube_events)} liked videos")
+        except Exception as e:
+            logger.error(f"YouTube collection failed: {e}")
+    else:
+        logger.warning("YouTube credentials not configured, skipping YouTube collection")
+
     # Store events in database
     if all_events:
         try:
@@ -241,8 +257,75 @@ def check_and_process() -> None:
             f"Processed {len(events)} events into "
             f"{len(result.activities)} activities, "
             f"{len(result.new_projects)} new projects, "
-            f"{len(result.tweets)} tweets"
+            f"{len(result.tweets)} tweets, "
+            f"{len(result.new_entities)} new entities, "
+            f"{len(result.entity_relationships)} relationships"
         )
+
+        # Store entities and relationships from AI response
+        entity_id_map: Dict[str, int] = {}
+        if result.new_entities:
+            try:
+                logger.info(f"Storing {len(result.new_entities)} entities...")
+                for entity_data in result.new_entities:
+                    entity_name = entity_data.get("name", "")
+                    entity_type = entity_data.get("type", "unknown")
+                    display_name = entity_data.get("display_name")
+                    metadata = entity_data.get("metadata", {})
+                    
+                    if entity_name:
+                        entity_id = db.get_or_create_entity(
+                            name=entity_name,
+                            entity_type=entity_type,
+                            display_name=display_name,
+                            metadata=metadata,
+                        )
+                        entity_id_map[entity_name] = entity_id
+                        logger.debug(f"Stored entity: {entity_name} (type: {entity_type}, id: {entity_id})")
+                
+                logger.info(f"Successfully stored {len(entity_id_map)} entities")
+            except Exception as e:
+                logger.error(f"Error storing entities: {e}")
+                # Don't fail the batch if entity storage fails
+        
+        # Store entity relationships
+        if result.entity_relationships and entity_id_map:
+            try:
+                logger.info(f"Storing {len(result.entity_relationships)} entity relationships...")
+                for rel in result.entity_relationships:
+                    from_entity = rel.get("from", "")
+                    to_entity = rel.get("to", "")
+                    rel_type = rel.get("type", "related_to")
+                    confidence = rel.get("confidence", 1.0)
+                    
+                    # Get entity IDs (entities must exist in our map)
+                    from_id = entity_id_map.get(from_entity)
+                    to_id = entity_id_map.get(to_entity)
+                    
+                    if from_id and to_id:
+                        # Determine entity types from the new_entities data
+                        from_type = "unknown"
+                        to_type = "unknown"
+                        for entity_data in result.new_entities:
+                            if entity_data.get("name") == from_entity:
+                                from_type = entity_data.get("type", "unknown")
+                            if entity_data.get("name") == to_entity:
+                                to_type = entity_data.get("type", "unknown")
+                        
+                        db.create_relationship(
+                            from_type=from_type,
+                            from_id=from_id,
+                            to_type=to_type,
+                            to_id=to_id,
+                            rel_type=rel_type,
+                            confidence=confidence,
+                        )
+                        logger.debug(f"Stored relationship: {from_entity} -> {to_entity} ({rel_type})")
+                
+                logger.info(f"Successfully stored entity relationships")
+            except Exception as e:
+                logger.error(f"Error storing entity relationships: {e}")
+                # Don't fail the batch if relationship storage fails
 
         # Handle new projects
         if result.new_projects:
@@ -270,11 +353,12 @@ def check_and_process() -> None:
                     logger.info(f"Created new project: {project_name}")
 
         # Store activities and write to Obsidian
-        activities_by_project: Dict[str, List[Activity]] = {}
+        activities_by_project: Dict[str, List[Dict[str, Any]]] = {}
         personal_activities: List[Dict[str, Any]] = []
         all_tweets: List[Dict[str, Any]] = []
+        activity_id_map: Dict[int, int] = {}  # Maps activity index to activity_id
 
-        for activity_data in result.activities:
+        for idx, activity_data in enumerate(result.activities):
             project_name = activity_data.get("project", activity_data.get("project_name", "misc"))
             
             # Insert into database
@@ -286,6 +370,29 @@ def check_and_process() -> None:
                 source_refs=json.dumps(activity_data.get("sources", [])),
                 raw_event_ids=json.dumps([e.id for e in events if e.id]),
             )
+
+            # Track activity ID for entity relationship creation
+            activity_id_map[idx] = activity_id
+
+            # Create activity-entity relationships
+            activity_entities = activity_data.get("entities", [])
+            if activity_entities and entity_id_map:
+                try:
+                    for entity_name in activity_entities:
+                        entity_id = entity_id_map.get(entity_name)
+                        if entity_id:
+                            # Create relationship: activity -> entity
+                            db.create_relationship(
+                                from_type="activity",
+                                from_id=activity_id,
+                                to_type="entity",
+                                to_id=entity_id,
+                                rel_type="mentions",
+                                confidence=1.0,
+                            )
+                            logger.debug(f"Created activity-entity relationship: activity {activity_id} -> entity {entity_id}")
+                except Exception as e:
+                    logger.error(f"Error creating activity-entity relationships: {e}")
 
             activity_dict = {
                 "id": activity_id,
@@ -320,7 +427,15 @@ def check_and_process() -> None:
         try:
             # Write project activity logs
             for project_name, activities in activities_by_project.items():
-                obsidian_writer.write_activity_log(project_name, activities)
+                # Get project entities for this project
+                project_entities: List[Entity] = []
+                try:
+                    project_entities = db.get_project_entities(project_name, days=7)
+                    logger.info(f"Retrieved {len(project_entities)} entities for project {project_name}")
+                except Exception as e:
+                    logger.warning(f"Could not retrieve entities for {project_name}: {e}")
+                
+                obsidian_writer.write_activity_log(project_name, activities, entities=project_entities)
                 logger.info(f"Wrote activity log for {project_name}")
 
             # Write personal activities
@@ -395,8 +510,16 @@ def run_weekly_synthesis() -> None:
                 current_readme=current_readme,
             )
 
+            # Get project entities for README enhancement
+            project_entities: List[Entity] = []
+            try:
+                project_entities = db.get_project_entities(project_name, days=7)
+                logger.info(f"Retrieved {len(project_entities)} entities for weekly summary of {project_name}")
+            except Exception as e:
+                logger.warning(f"Could not retrieve entities for {project_name}: {e}")
+            
             # Update README
-            obsidian_writer.update_project_readme(project_name, weekly_summary)
+            obsidian_writer.update_project_readme(project_name, weekly_summary, entities=project_entities)
             logger.info(f"Updated README for {project_name} with weekly summary")
 
         logger.info("Weekly synthesis completed")
