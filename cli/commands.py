@@ -386,53 +386,46 @@ def collect_all(args):
 
 
 def process_now(args):
-    """Process unprocessed events immediately."""
-    print("Processing unprocessed events...")
-    settings = get_settings()
-    
+    """Process unprocessed events with AI (same as the scheduler's hourly process)."""
+    print("Processing unprocessed events with AI...")
+    if args.force:
+        print("(--force: skipping batch manager threshold checks)")
+
     try:
-        db = Database(settings.database.path)
-        
-        events = db.get_unprocessed_events(limit=args.limit)
-        
-        if not events:
-            print("No unprocessed events found")
-            return 0
-        
-        print(f"Found {len(events)} events to process")
-        
-        # Create batch
-        batch_id = db.create_batch(
-            total_events=len(events),
-            model_used=settings.openai.model
-        )
-        print(f"Created processing batch: {batch_id}")
-        
-        # Process events (simplified)
-        processed = 0
-        event_ids = []
-        
-        for event in events:
-            # Simplified processing - in production, this would use AI
-            print(f"  Processing: {event.source} - {event.event_type}")
-            event_ids.append(event.id)
-            processed += 1
-        
-        # Mark as processed
-        db.mark_events_processed(event_ids)
-        
-        # Complete batch
-        db.complete_batch(
-            batch_id=batch_id,
-            processed_count=processed,
-            tokens_used=0
-        )
-        
-        print(f"\nProcessed {processed} events successfully!")
+        from main import check_and_process
+        check_and_process(force=args.force)
+        print("\nAI processing completed!")
         return 0
-        
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+def run_cycle(args):
+    """Run a full collection + AI processing cycle (same as the scheduler's hourly job)."""
+    print("Running full collection + processing cycle...")
+    print("=" * 50)
+
+    try:
+        from main import run_collectors, check_and_process
+
+        # Step 1: Collect
+        print("\n--- Step 1: Data Collection ---")
+        run_collectors()
+
+        # Step 2: AI Process
+        print("\n--- Step 2: AI Processing ---")
+        check_and_process()
+
+        print("\n" + "=" * 50)
+        print("Full cycle completed!")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 
@@ -869,8 +862,11 @@ def main():
     collect_parser.add_argument("--skip-youtube", action="store_true", help="Skip YouTube")
     
     # process-now command
-    process_parser = subparsers.add_parser("process-now", help="Process unprocessed events")
-    process_parser.add_argument("--limit", type=int, default=100, help="Max events to process")
+    process_parser = subparsers.add_parser("process-now", help="Process unprocessed events with AI")
+    process_parser.add_argument("--force", action="store_true", help="Skip batch manager threshold checks (time/token gates)")
+
+    # run-cycle command
+    subparsers.add_parser("run-cycle", help="Run full collect + AI process cycle (like the hourly scheduler job)")
     
     # show-events command
     events_parser = subparsers.add_parser("show-events", help="Show recent events")
@@ -909,6 +905,7 @@ def main():
         "test-obsidian": test_obsidian,
         "collect-all": collect_all,
         "process-now": process_now,
+        "run-cycle": run_cycle,
         "show-events": show_events,
         "show-stats": show_stats,
         "generate-logs": generate_logs,

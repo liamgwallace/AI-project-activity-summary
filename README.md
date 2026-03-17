@@ -351,11 +351,15 @@ python -m cli.commands collect-all --skip-gmail --skip-calendar
 ### Processing Data
 
 ```bash
-# Process unprocessed events immediately
+# Run full cycle (collect + AI process) — same as the hourly scheduler job
+python -m cli.commands run-cycle
+
+# Process unprocessed events with AI (without collecting first)
 python -m cli.commands process-now
 
-# Process with limit
-python -m cli.commands process-now --limit 50
+# Run weekly synthesis manually (normally runs Sundays at 20:00)
+python -m cli.commands weekly-synthesis
+python -m cli.commands weekly-synthesis --days 14
 ```
 
 ### Viewing Results
@@ -398,7 +402,9 @@ The CLI provides commands for testing, collecting, processing, and managing the 
 
 | Command | Description | Options |
 |---------|-------------|---------|
-| `process-now` | Process unprocessed events | `--limit N` - Max events to process |
+| `process-now` | Process unprocessed events with AI | None |
+| `run-cycle` | Run full collect + AI process cycle (like the hourly scheduler job) | None |
+| `weekly-synthesis` | Run weekly synthesis to generate project README summaries | `--days N` - Days to analyze (default: 7) |
 
 ### Reporting Commands
 
@@ -418,9 +424,15 @@ python -m cli.commands test-gmail
 python -m cli.commands test-calendar
 python -m cli.commands test-ai
 
-# Full collection cycle
+# Full collection + AI processing cycle (one command)
+python -m cli.commands run-cycle
+
+# Or run steps separately
 python -m cli.commands collect-all
 python -m cli.commands process-now
+
+# Run weekly synthesis manually
+python -m cli.commands weekly-synthesis
 
 # Get weekly report
 python -m cli.commands generate-logs --days 7 --output weekly-report.json

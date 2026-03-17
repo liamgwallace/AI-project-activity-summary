@@ -24,7 +24,9 @@ The CLI module provides commands for testing data collectors, running the proces
 - `collect-all [--skip-github] [--skip-gmail] [--skip-calendar]` - Collect data from all enabled sources
 
 ### Processing Commands
-- `process-now [--limit N]` - Process unprocessed events immediately
+- `process-now` - Process unprocessed events with AI (same as scheduler's hourly AI step)
+- `run-cycle` - Run full collect + AI process cycle (same as the hourly scheduler job)
+- `weekly-synthesis [--days N]` - Run weekly synthesis to generate project README summaries (default: 7 days)
 
 ### View Commands
 - `show-events [--days N] [--limit N] [--verbose]` - Display recent events
@@ -41,11 +43,15 @@ python -m cli.commands test-github
 python -m cli.commands test-gmail
 python -m cli.commands test-db
 
-# Collect data from all sources
-python -m cli.commands collect-all
+# Run full cycle (collect + AI process)
+python -m cli.commands run-cycle
 
-# Process pending events
-python -m cli.commands process-now --limit 50
+# Or run steps separately
+python -m cli.commands collect-all
+python -m cli.commands process-now
+
+# Run weekly synthesis manually
+python -m cli.commands weekly-synthesis
 
 # View recent events
 python -m cli.commands show-events --days 7 --verbose

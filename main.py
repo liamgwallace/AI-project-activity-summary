@@ -179,10 +179,13 @@ def run_collectors() -> None:
         logger.info("No events collected in this cycle")
 
 
-def check_and_process() -> None:
+def check_and_process(force: bool = False) -> None:
     """
     Check if batch processing is needed and run AI processing if thresholds are met.
     Writes processed outputs to Obsidian vaults.
+
+    Args:
+        force: If True, skip batch manager threshold checks and process all unprocessed events.
     """
     logger = logging.getLogger(__name__)
     logger.info("Checking if processing is needed...")
@@ -202,8 +205,8 @@ def check_and_process() -> None:
     # Initialize batch manager
     batch_manager = BatchManager(db=db)
 
-    # Check if processing should run
-    if not batch_manager.should_process():
+    # Check if processing should run (skip check if forced)
+    if not force and not batch_manager.should_process():
         logger.info("Processing not needed at this time")
         return
 

@@ -7,13 +7,16 @@ from datetime import datetime
 from typing import Optional
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from config.settings import get_settings
 from storage.database import Database
 from collectors.browser_receiver import BrowserReceiver
+from api.dashboard_routes import router as dashboard_router
 
 # Set up logging
 import logging
@@ -88,11 +91,23 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="PAI Browser Receiver",
-    description="Receives browser activity data from PAIS browser extension",
+    title="PAIS - Personal Activity Intelligence System",
+    description="Activity tracking, AI processing, and web dashboard",
     version=settings.version,
     lifespan=lifespan,
 )
+
+# Mount static files and templates for dashboard
+_static_dir = Path(__file__).parent / "static"
+_templates_dir = Path(__file__).parent / "templates"
+_static_dir.mkdir(exist_ok=True)
+_templates_dir.mkdir(exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+templates = Jinja2Templates(directory=str(_templates_dir))
+
+# Include dashboard API routes
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -195,17 +210,30 @@ async def get_stats(x_api_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=500, detail=f"Error fetching stats: {str(e)}")
 
 
+# Dashboard page
+@app.get("/dashboard")
+async def dashboard(request: Request):
+    """Serve the web dashboard."""
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "version": settings.version,
+    })
+
+
 # Root endpoint
 @app.get("/")
 async def root():
     """Root endpoint with API info."""
     return {
-        "name": "PAI Browser Receiver",
+        "name": "PAIS - Personal Activity Intelligence System",
         "version": settings.version,
+        "dashboard": "/dashboard",
         "endpoints": [
+            {"path": "/dashboard", "method": "GET", "description": "Web dashboard"},
             {"path": "/api/health", "method": "GET", "description": "Health check"},
             {"path": "/api/browser/visit", "method": "POST", "description": "Receive page visit"},
             {"path": "/api/stats", "method": "GET", "description": "Get statistics"},
+            {"path": "/api/dashboard/*", "method": "GET/POST", "description": "Dashboard API"},
         ]
     }
 

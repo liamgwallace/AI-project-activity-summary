@@ -1,0 +1,132 @@
+/* PAIS Dashboard Styles */
+
+body {
+    background-color: #f8f9fa;
+    font-size: 0.9rem;
+}
+
+.nav-tabs .nav-link {
+    color: #495057;
+}
+
+.nav-tabs .nav-link.active {
+    font-weight: 600;
+}
+
+/* Command output */
+.cmd-output {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    padding: 16px;
+    border-radius: 6px;
+    max-height: 500px;
+    overflow-y: auto;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    min-height: 60px;
+}
+
+.cmd-output:empty::before {
+    content: "Command output will appear here...";
+    color: #666;
+}
+
+.cmd-output.success {
+    border-left: 4px solid #4CAF50;
+}
+
+.cmd-output.error {
+    border-left: 4px solid #f44336;
+}
+
+/* Log output */
+.logs-output {
+    background-color: #1a1a2e;
+    color: #e0e0e0;
+    padding: 16px;
+    border-radius: 6px;
+    max-height: 600px;
+    overflow-y: auto;
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    min-height: 200px;
+    line-height: 1.6;
+}
+
+.logs-output:empty::before {
+    content: "No log data loaded yet...";
+    color: #666;
+}
+
+.log-error { color: #ff6b6b; }
+.log-warning { color: #ffd93d; }
+.log-info { color: #6bcb77; }
+
+/* Graph container */
+#graph-container {
+    width: 100%;
+    height: 600px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background-color: #fff;
+}
+
+/* Table tweaks */
+.table th {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: #6c757d;
+}
+
+.table td {
+    font-size: 0.85rem;
+    vertical-align: middle;
+}
+
+/* Entity type badges */
+.entity-badge {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #fff;
+}
+
+.entity-badge.technology { background-color: #4CAF50; }
+.entity-badge.concept { background-color: #9C27B0; }
+.entity-badge.project { background-color: #FFC107; color: #333; }
+.entity-badge.person { background-color: #F44336; }
+.entity-badge.webpage { background-color: #2196F3; }
+.entity-badge.file { background-color: #FF9800; }
+.entity-badge.tool { background-color: #607D8B; }
+.entity-badge.unknown { background-color: #999; }
+
+/* Source badges */
+.source-badge {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #fff;
+}
+
+.source-badge.github { background-color: #333; }
+.source-badge.gmail { background-color: #EA4335; }
+.source-badge.calendar { background-color: #4285F4; }
+.source-badge.browser { background-color: #FF9800; }
+.source-badge.youtube { background-color: #FF0000; }
+.source-badge.test { background-color: #999; }
+
+/* Token stats cards */
+#token-stats .card {
+    border-left: 3px solid #007bff;
+}
+
+#token-stats .card h4 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+/* Processed badge */
+.badge-processed { background-color: #4CAF50; }
+.badge-unprocessed { background-color: #ff9800; }
