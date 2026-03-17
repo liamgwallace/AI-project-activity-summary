@@ -88,6 +88,7 @@ PAIS automatically tracks your digital activities and transforms them into organ
 
 ### Core Features
 
+- **Web Dashboard**: Browser-based UI to run commands, browse data, view entity graph, and tail logs
 - **Multi-Source Collection**: Aggregate data from GitHub, Gmail, Google Calendar, and browser history
 - **AI-Powered Processing**: Uses GPT-4o-mini via OpenRouter for intelligent activity analysis
 - **Project Detection**: Automatically detects and manages projects based on activity patterns
@@ -129,7 +130,7 @@ docker-compose up -d
 python -m cli.commands test-db
 ```
 
-Access the API at `http://localhost:8000` and view health status at `http://localhost:8000/api/health`.
+Access the **web dashboard** at `http://localhost:8000/dashboard` and the API at `http://localhost:8000`.
 
 ## Installation
 
@@ -325,6 +326,7 @@ python main.py
 This starts:
 - Background scheduler (hourly collection + processing)
 - FastAPI server on port 8000
+- **Web dashboard** at `http://localhost:8000/dashboard`
 
 **Docker:**
 
@@ -361,6 +363,19 @@ python -m cli.commands process-now
 python -m cli.commands weekly-synthesis
 python -m cli.commands weekly-synthesis --days 14
 ```
+
+### Web Dashboard
+
+Access the web dashboard at `http://localhost:8000/dashboard` (requires server running via `python main.py`).
+
+| Tab | Description |
+|-----|-------------|
+| **Commands** | Run collect, process, weekly synthesis, or full cycle with live output display |
+| **Events** | Browse raw events with source and time filtering |
+| **Activities** | Browse AI-processed activities filtered by project |
+| **Entities** | View extracted entities (technologies, concepts, people) |
+| **Graph** | Interactive entity/relationship graph visualization |
+| **Logs** | Tail application logs with level filtering |
 
 ### Viewing Results
 
@@ -772,8 +787,14 @@ SELECT * FROM token_usage ORDER BY timestamp DESC LIMIT 10;
 
 ```
 AI-project-activity-summary/
-├── api/                    # FastAPI server
-│   ├── server.py          # Main API endpoints
+├── api/                    # FastAPI server + web dashboard
+│   ├── server.py          # Main API application
+│   ├── dashboard_routes.py # Dashboard API endpoints
+│   ├── templates/         # Jinja2 templates
+│   │   └── dashboard.html # Web dashboard UI
+│   ├── static/            # Static assets
+│   │   ├── dashboard.js   # Dashboard client-side JS
+│   │   └── dashboard.css  # Dashboard styles
 │   └── __init__.py
 ├── chrome_extension/       # Browser extension
 │   ├── background.js      # Service worker
